@@ -142,6 +142,73 @@
 
 ---
 
+## 🌐 多服务器连接与集群管理 (Multi-Host Architecture)
+
+`@atengk/mcp-server-ssh` 内置企业级连接池管理器（`ConnectionPool`），原生支持在单个服务内同时维持与调度多台 Linux 主机。根据您的使用习惯，提供三种灵活的架构模式：
+
+### 模式一：单 MCP 实例内的【动态连接池路由】（最灵活、推荐）
+
+只需启动一个通用的 MCP 服务（如上述“场景 5”的空载配置），AI 即可在自然语言对话中随时建立、切换并并发调度多台主机：
+
+#### 跨主机协同调度机制
+所有命令与文件工具（`ssh_exec`、`sftp_*` 等）均包含可选参数 `connectionId`：
+- **建立连接**：调用 `ssh_connect` 时指定 `connectionId: "prod"` 或 `connectionId: "test"`；
+- **定向下发**：传入 `connectionId` 时，请求将精准路由至对应主机的物理通道；未传入时自动路由至当前的默认连接（`Default Connection`）；
+- **跨机数据同步**：AI 可在一个任务链中从主机 A 下载文件（`sftp_download(..., connectionId: "test")`），紧接着直接上传至主机 B（`sftp_upload(..., connectionId: "prod")`）！
+
+#### 跨机实战对话范例：
+> **用户**：“帮我连上生产机 `103.236.97.210:37909` (命名为 `prod`)，再连上测试机 `192.168.1.50` (命名为 `test`)。然后对比两台机器的可用内存。”
+>
+> 🤖 **AI 行为**：
+> 1. 调用 `ssh_connect({ host: "103.236.97.210", port: 37909, username: "root", connectionId: "prod", setAsDefault: true })`；
+> 2. 调用 `ssh_connect({ host: "192.168.1.50", port: 22, username: "dev", connectionId: "test" })`；
+> 3. 分别调用 `ssh_exec({ command: "free -m", connectionId: "prod" })` 与 `ssh_exec({ command: "free -m", connectionId: "test" })`；
+> 4. 对比两台服务器的内存指标并为您生成直观的可视化对比表格。
+
+---
+
+### 模式二：客户端级别的【静态多实例隔离】（物理隔离、互不干扰）
+
+如果您希望在客户端一打开时就有几个**完全独立、固定常驻**的主机通道，直接在客户端配置文件中声明多个独立的 Server 实例：
+
+```json
+{
+  "mcpServers": {
+    "ssh-prod": {
+      "command": "npx",
+      "args": ["-y", "@atengk/mcp-server-ssh"],
+      "env": {
+        "SSH_HOST": "103.236.97.210",
+        "SSH_PORT": "37909",
+        "SSH_USER": "root",
+        "SSH_KEY_PATH": "D:\\files\\server\\id_ed25519"
+      }
+    },
+    "ssh-test": {
+      "command": "npx",
+      "args": ["-y", "@atengk/mcp-server-ssh"],
+      "env": {
+        "SSH_HOST": "192.168.1.50",
+        "SSH_PORT": "22",
+        "SSH_USER": "dev",
+        "SSH_PASSWORD": "test_password"
+      }
+    }
+  }
+}
+```
+* **效果**：客户端会同时启动两个独立的 Node.js 子进程，AI 的工具箱中会自动隔离出 `ssh-prod:ssh_exec` 和 `ssh-test:ssh_exec` 两个独立工具集。
+
+---
+
+### 模式三：继承本地 `~/.ssh/config` 集群别名（零凭证泄露）
+
+在宿主机的 `~/.ssh/config` 中配置多主机拓扑（含各自私钥、自定义端口与跳板机），启动服务后，无需在聊天中告知 AI 任何敏感 IP 或密码：
+> **用户**：“帮我连上本地配置里的 `ali-prod` 和 `tencent-test` 主机。”  
+> 🤖 **AI**：自动通过 `sshConfigAlias` 建立连接并映射路由，安全优雅！
+
+---
+
 ## 💬 AI 对话实战范例 (Showcase & Prompts)
 
 配置完成后，您可以直接在 AI 聊天窗口中像与专业资深运维工程师对话一样发出自然指令：
