@@ -15,6 +15,7 @@ import { SafetyGuard } from "./security/guard.js";
 import { OutputTruncator } from "./security/truncator.js";
 import { ExecService } from "./services/exec-service.js";
 import { SessionService } from "./services/session-service.js";
+import { SFTPService } from "./services/sftp-service.js";
 import { SSHConnectParamsSchema, SSHDisconnectParamsSchema } from "./types/connection.js";
 import {
   SSHExecParamsSchema,
@@ -22,6 +23,16 @@ import {
   SSHSessionSendParamsSchema,
   SSHSessionStartParamsSchema,
 } from "./types/exec.js";
+import {
+  SFTPDownloadParamsSchema,
+  SFTPListDirParamsSchema,
+  SFTPMkdirParamsSchema,
+  SFTPReadFileParamsSchema,
+  SFTPRemoveParamsSchema,
+  SFTPStatParamsSchema,
+  SFTPUploadParamsSchema,
+  SFTPWriteFileParamsSchema,
+} from "./types/sftp.js";
 
 // 1. 初始化环境变量配置
 dotenv.config();
@@ -36,6 +47,7 @@ export interface MCPServerOptions {
   outputTruncator?: OutputTruncator;
   execService?: ExecService;
   sessionService?: SessionService;
+  sftpService?: SFTPService;
 }
 
 /**
@@ -62,6 +74,11 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       connectionPool: pool,
       safetyGuard,
       outputTruncator,
+    });
+  const sftpService =
+    options?.sftpService ??
+    new SFTPService({
+      connectionPool: pool,
     });
 
   const server = new McpServer({
@@ -341,6 +358,246 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
             {
               type: "text",
               text: `PTY 终端关闭异常: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 10. 注册读取远程文本文件工具
+  server.tool(
+    "sftp_read_file",
+    "读取远程主机文本文件内容（单次读取限制 512KB 防爆，超出建议下载）",
+    SFTPReadFileParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.readFile(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `读取远程文件失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 11. 注册写入远程文本文件工具
+  server.tool(
+    "sftp_write_file",
+    "写入并覆盖远程主机文本文件（支持自动递归创建父级目录）",
+    SFTPWriteFileParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.writeFile(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `写入远程文件失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 12. 注册浏览远程目录工具
+  server.tool(
+    "sftp_list_dir",
+    "列出远程目录下的文件与子目录元数据列表",
+    SFTPListDirParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.listDir(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `浏览远程目录失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 13. 注册获取远程文件/目录状态工具
+  server.tool(
+    "sftp_stat",
+    "获取远程文件或目录的 POSIX 详细元数据信息",
+    SFTPStatParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.stat(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `获取文件元数据失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 14. 注册创建远程目录工具
+  server.tool(
+    "sftp_mkdir",
+    "在远程主机上创建目录（默认类似 mkdir -p 递归创建上级目录）",
+    SFTPMkdirParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.mkdir(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `创建远程目录失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 15. 注册删除远程文件或目录工具
+  server.tool(
+    "sftp_remove",
+    "删除远程文件或目录（支持非空目录递归级联删除，内置防环保护）",
+    SFTPRemoveParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.remove(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `删除远程路径失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 16. 注册上传本地文件工具
+  server.tool(
+    "sftp_upload",
+    "将宿主机本地文件快速上传至远程目标主机",
+    SFTPUploadParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.upload(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `上传文件失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 17. 注册下载远程文件工具
+  server.tool(
+    "sftp_download",
+    "将远程主机上的文件快速下载到宿主机本地指定路径",
+    SFTPDownloadParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.download(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `下载文件失败: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };

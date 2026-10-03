@@ -51,6 +51,46 @@ class MockSSHClient extends EventEmitter {
     cb(null, stream);
     return stream;
   });
+  public sftp = vi.fn((cb) => {
+    const mockSftp = {
+      stat: vi.fn((_path, statCb) =>
+        statCb(null, {
+          size: 42,
+          mtime: 1700000000,
+          atime: 1700000000,
+          mode: 33188,
+          isDirectory: () => false,
+          isFile: () => true,
+          isSymbolicLink: () => false,
+        })
+      ),
+      readFile: vi.fn((_path, readCb) => readCb(null, Buffer.from("mock sftp file content"))),
+      writeFile: vi.fn((_path, _content, writeCb) => writeCb(null)),
+      readdir: vi.fn((_path, dirCb) =>
+        dirCb(null, [
+          {
+            filename: "test.txt",
+            attrs: {
+              size: 42,
+              mtime: 1700000000,
+              atime: 1700000000,
+              mode: 33188,
+              isDirectory: () => false,
+              isFile: () => true,
+              isSymbolicLink: () => false,
+            },
+          },
+        ])
+      ),
+      mkdir: vi.fn((_path, mkdirCb) => mkdirCb(null)),
+      rmdir: vi.fn((_path, rmdirCb) => rmdirCb(null)),
+      unlink: vi.fn((_path, unlinkCb) => unlinkCb(null)),
+      fastPut: vi.fn((_l, _r, putCb) => putCb(null)),
+      fastGet: vi.fn((_r, _l, getCb) => getCb(null)),
+      on: vi.fn(),
+    };
+    cb(null, mockSftp);
+  });
 }
 
 describe("MCP Server 装配入口与工具调用端到端测试", () => {
@@ -107,6 +147,14 @@ Host test-alias
     expect(toolNames).toContain("ssh_session_start");
     expect(toolNames).toContain("ssh_session_send");
     expect(toolNames).toContain("ssh_session_close");
+    expect(toolNames).toContain("sftp_read_file");
+    expect(toolNames).toContain("sftp_write_file");
+    expect(toolNames).toContain("sftp_list_dir");
+    expect(toolNames).toContain("sftp_stat");
+    expect(toolNames).toContain("sftp_mkdir");
+    expect(toolNames).toContain("sftp_remove");
+    expect(toolNames).toContain("sftp_upload");
+    expect(toolNames).toContain("sftp_download");
   });
 
   it("应当支持端到端执行 ssh_exec 并返回执行结果", async () => {
@@ -174,4 +222,32 @@ Host test-alias
     const closeData = JSON.parse((closeRes.content[0] as any).text);
     expect(closeData.closed).toBe(true);
   });
+
+  it("应当支持端到端 SFTP 文本文件读取与目录浏览", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    // 1. 读取文件
+    const readRes = await client.callTool({
+      name: "sftp_read_file",
+      arguments: { remotePath: "/etc/profile" },
+    });
+    expect(readRes.isError).toBeFalsy();
+    const readData = JSON.parse((readRes.content[0] as any).text);
+    expect(readData.content).toBe("mock sftp file content");
+    expect(readData.bytesRead).toBe(42);
+
+    // 2. 浏览目录
+    const listRes = await client.callTool({
+      name: "sftp_list_dir",
+      arguments: { remotePath: "/var/log" },
+    });
+    expect(listRes.isError).toBeFalsy();
+    const listData = JSON.parse((listRes.content[0] as any).text);
+    expect(listData.items).toHaveLength(1);
+    expect(listData.items[0].name).toBe("test.txt");
+  });
 });
+
