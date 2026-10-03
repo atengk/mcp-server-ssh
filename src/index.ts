@@ -11,7 +11,17 @@ import dotenv from "dotenv";
 import { z } from "zod";
 import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/manager.js";
+import { SafetyGuard } from "./security/guard.js";
+import { OutputTruncator } from "./security/truncator.js";
+import { ExecService } from "./services/exec-service.js";
+import { SessionService } from "./services/session-service.js";
 import { SSHConnectParamsSchema, SSHDisconnectParamsSchema } from "./types/connection.js";
+import {
+  SSHExecParamsSchema,
+  SSHSessionCloseParamsSchema,
+  SSHSessionSendParamsSchema,
+  SSHSessionStartParamsSchema,
+} from "./types/exec.js";
 
 // 1. 初始化环境变量配置
 dotenv.config();
@@ -22,17 +32,37 @@ dotenv.config();
 export interface MCPServerOptions {
   connectionPool?: ConnectionPool;
   configParser?: SSHConfigParser;
+  safetyGuard?: SafetyGuard;
+  outputTruncator?: OutputTruncator;
+  execService?: ExecService;
+  sessionService?: SessionService;
 }
 
 /**
  * 创建并配置 MCP Server 实例与工具注册
  *
- * @param options 可选注入的连接池与配置解析器
+ * @param options 可选注入的底层服务与依赖实例
  * @return 配置完成的 McpServer 实例
  */
 export function createMCPServer(options?: MCPServerOptions): McpServer {
   const configParser = options?.configParser ?? new SSHConfigParser();
   const pool = options?.connectionPool ?? new ConnectionPool({ configParser });
+  const safetyGuard = options?.safetyGuard ?? new SafetyGuard();
+  const outputTruncator = options?.outputTruncator ?? new OutputTruncator();
+  const execService =
+    options?.execService ??
+    new ExecService({
+      connectionPool: pool,
+      safetyGuard,
+      outputTruncator,
+    });
+  const sessionService =
+    options?.sessionService ??
+    new SessionService({
+      connectionPool: pool,
+      safetyGuard,
+      outputTruncator,
+    });
 
   const server = new McpServer({
     name: "mcp-server-ssh",
@@ -177,6 +207,144 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
           },
         ],
       };
+    }
+  );
+
+  // 6. 注册无状态命令执行工具 (主力工具)
+  server.tool(
+    "ssh_exec",
+    "在远程 Linux 主机执行单次无状态 Bash/Shell 命令，精准返回退出码、标准输出与标准错误",
+    SSHExecParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await execService.execute(params);
+        return {
+          isError: result.exitCode !== 0,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `命令执行异常: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 7. 注册启动交互式 PTY 伪终端会话工具
+  server.tool(
+    "ssh_session_start",
+    "在远程主机启动持久交互式伪终端 (PTY) 会话，支持跨多次输入维持环境状态",
+    SSHSessionStartParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sessionService.startSession(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "started",
+                  sessionId: result.sessionId,
+                  message: "已成功启动持久交互式 PTY 伪终端会话",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `PTY 终端启动失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 8. 注册向持久终端发送输入/控制信号工具
+  server.tool(
+    "ssh_session_send",
+    "向指定的持久 PTY 终端写入指令或控制信号（如 '\\x03' 发送 Ctrl+C），并收集增量屏幕回显",
+    SSHSessionSendParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sessionService.sendInput(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `PTY 终端输入交互失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 9. 注册关闭持久终端会话工具
+  server.tool(
+    "ssh_session_close",
+    "关闭指定的持久交互式 PTY 终端会话并回收系统资源",
+    SSHSessionCloseParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sessionService.closeSession(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: result.closed ? "closed" : "not_found",
+                  sessionId: result.sessionId,
+                  closed: result.closed,
+                  message: result.closed ? "已成功关闭 PTY 终端会话" : "未找到对应的 PTY 终端会话",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `PTY 终端关闭异常: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
     }
   );
 
