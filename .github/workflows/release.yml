@@ -42,14 +42,59 @@ jobs:
         run: pnpm build
 
       - name: 发布至 NPM 注册表
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 生成 Release 发版说明 (Changelog 驱动与模板保底)
+        run: |
+          node -e '
+          const fs = require("fs");
+          const tag = process.env.TAG_NAME || "";
+          const cleanTag = tag.replace(/^v/, "");
+          let changelogBody = "";
+
+          if (fs.existsSync("CHANGELOG.md")) {
+            const content = fs.readFileSync("CHANGELOG.md", "utf8");
+            const escaped = cleanTag.replace(/\./g, "\\.");
+            const regex = new RegExp(`##\\s+\\[v?${escaped}\\][\\s\\S]*?(?=(?:\\n##\\s+\\[)|$)`, "i");
+            const match = content.match(regex);
+            if (match) {
+              changelogBody = match[0].trim();
+            }
+          }
+
+          if (!changelogBody) {
+            changelogBody = `## 发版概述 (${tag})\n\n本次发版包含生产稳定性优化、架构加固与功能增强。`;
+          }
+
+          const fullNotes = [
+            changelogBody,
+            "",
+            "---",
+            "### 📦 快速免安装运行 (Quick Start)",
+            "在任何支持 MCP 的宿主（Claude Desktop, Cursor, Antigravity, Cline 等）中直接配置：",
+            "```bash",
+            "npx -y @atengk/mcp-server-ssh",
+            "```",
+            "",
+            "### 🔗 相关资产与生态链接",
+            "- 📦 **NPM Registry**: [https://www.npmjs.com/package/@atengk/mcp-server-ssh](https://www.npmjs.com/package/@atengk/mcp-server-ssh)",
+            "- 🛡️ **Provenance 验证**: 本次构建由 GitHub Actions 原生 OIDC 签发不可篡改的 Provenance 来源凭据",
+            "- 📖 **完整文档与示例**: [https://github.com/atengk/mcp-server-ssh#readme](https://github.com/atengk/mcp-server-ssh#readme)"
+          ].join("\n");
+
+          fs.writeFileSync("RELEASE_NOTES.md", fullNotes);
+          '
+        env:
+          TAG_NAME: ${{ github.ref_name }}
 
       - name: 创建 GitHub Release 发版
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          name: "Release ${{ github.ref_name }}"
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           files: |
             dist/index.js

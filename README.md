@@ -63,8 +63,8 @@
       "command": "npx",
       "args": ["-y", "@atengk/mcp-server-ssh"],
       "env": {
-        "SSH_HOST": "103.236.97.210",
-        "SSH_PORT": "37909",
+        "SSH_HOST": "192.168.1.100",
+        "SSH_PORT": "22",
         "SSH_USER": "root",
         "SSH_PASSWORD": "your_secure_password"
       }
@@ -81,16 +81,17 @@
       "command": "npx",
       "args": ["-y", "@atengk/mcp-server-ssh"],
       "env": {
-        "SSH_HOST": "103.236.97.210",
-        "SSH_PORT": "37909",
+        "SSH_HOST": "192.168.1.100",
+        "SSH_PORT": "22",
         "SSH_USER": "root",
-        "SSH_KEY_PATH": "D:\\files\\server\\id_ed25519",
+        "SSH_KEY_PATH": "D:/files/server/id_ed25519",
         "SSH_KEY_PASSPHRASE": "optional_passphrase"
       }
     }
   }
 }
 ```
+> 💡 **Windows 提示**：本地路径强烈推荐统一使用正斜杠（如 `"D:/files/server/id_ed25519"`），Node.js 原生完美支持，且能彻底避免 JSON 反斜杠转义（`\\`）遗漏导致的解析崩溃。
 
 ### 场景 3：直接复用本地 `~/.ssh/config` 别名 (最推荐，省心免配)
 直接继承本机既有的公私钥路径、跳板机、自定义端口与 Host 别名：
@@ -157,10 +158,10 @@
 - **跨机数据同步**：AI 可在一个任务链中从主机 A 下载文件（`sftp_download(..., connectionId: "test")`），紧接着直接上传至主机 B（`sftp_upload(..., connectionId: "prod")`）！
 
 #### 跨机实战对话范例：
-> **用户**：“帮我连上生产机 `103.236.97.210:37909` (命名为 `prod`)，再连上测试机 `192.168.1.50` (命名为 `test`)。然后对比两台机器的可用内存。”
+> **用户**：“帮我连上生产机 `192.168.1.100:22` (命名为 `prod`)，再连上测试机 `192.168.1.50:22` (命名为 `test`)。然后对比两台机器的可用内存。”
 >
 > 🤖 **AI 行为**：
-> 1. 调用 `ssh_connect({ host: "103.236.97.210", port: 37909, username: "root", connectionId: "prod", setAsDefault: true })`；
+> 1. 调用 `ssh_connect({ host: "192.168.1.100", port: 22, username: "root", connectionId: "prod", setAsDefault: true })`；
 > 2. 调用 `ssh_connect({ host: "192.168.1.50", port: 22, username: "dev", connectionId: "test" })`；
 > 3. 分别调用 `ssh_exec({ command: "free -m", connectionId: "prod" })` 与 `ssh_exec({ command: "free -m", connectionId: "test" })`；
 > 4. 对比两台服务器的内存指标并为您生成直观的可视化对比表格。
@@ -178,10 +179,10 @@
       "command": "npx",
       "args": ["-y", "@atengk/mcp-server-ssh"],
       "env": {
-        "SSH_HOST": "103.236.97.210",
-        "SSH_PORT": "37909",
+        "SSH_HOST": "192.168.1.100",
+        "SSH_PORT": "22",
         "SSH_USER": "root",
-        "SSH_KEY_PATH": "D:\\files\\server\\id_ed25519"
+        "SSH_KEY_PATH": "D:/files/server/id_ed25519"
       }
     },
     "ssh-test": {
@@ -253,7 +254,7 @@
 | | `ssh_disconnect` | 安全关闭并移除指定的物理 SSH 连接 | `connectionId` |
 | | `ssh_list_connections` | 列出当前连接池中所有活跃连接及默认路由 | 无 |
 | | `ssh_list_config_hosts` | 读取并列出本机 `~/.ssh/config` 预设的所有别名 | 无 |
-| **命令执行** | `ssh_exec` | 无状态执行远程命令（继承 PATH，支持 dryRun） | `command`, `connectionId?`, `cwd?`, `timeoutMs?`, `dryRun?` |
+| **命令执行** | `ssh_exec` | 无状态执行远程命令（继承 PATH，支持 dryRun 与安全逃生门） | `command`, `connectionId?`, `cwd?`, `timeoutMs?`, `dryRun?`, `dangerouslySkipSafetyCheck?` |
 | **持久终端** | `ssh_session_start` | 启动常驻交互式 PTY 伪终端会话流 | `connectionId?`, `cols?`, `rows?` |
 | | `ssh_session_send` | 向 PTY 终端注入输入或控制信号（如 `\x03` Ctrl+C） | `sessionId`, `input`, `waitForMs?` |
 | | `ssh_session_close` | 优雅关闭指定的交互式终端会话并回收系统资源 | `sessionId` |
@@ -272,6 +273,7 @@
 
 为了防范 AI 模型幻觉引发毁灭性系统灾难，服务内置了强力前置守卫：
 - **实时拦截黑名单**：自动阻断系统全盘强删（`rm -rf /`、`rm -rf /*`）、块设备覆写（`mkfs`、`dd if=... of=/dev/...`）、系统停机关机（`reboot`、`shutdown`、`init 0`）、清空根权限（`chmod -R 000 /`）及 Fork 炸弹等。
+- **运维受控逃生门**：针对系统管理员确需执行重启等特殊运维任务的场景，服务提供双重授权逃生门机制——必须在服务端配置环境变量 `SSH_ALLOW_DANGEROUS_COMMANDS=true`，且在 `ssh_exec` 调用时显式传入 `dangerouslySkipSafetyCheck: true` 方可放行，单方面调用将被严格拒绝。
 - **实机绝对安全**：拦截发生在客户端下发前，**危险字节流绝对不会走出本地网络，远端物理通道零受影响**。
 - **安全演练模式 (`dryRun`)**：在调用 `ssh_exec` 时传入 `dryRun: true`，可在不下发执行的前提下验证命令是否符合安全规则。
 
@@ -282,7 +284,7 @@
 <details>
 <summary><b>Q1: Windows 宿主机下私钥文件路径该如何填写？</b></summary>
 <br>
-在 JSON 配置文件中，Windows 反斜杠需双重转义，例如 <code>D:\\files\\server\\id_ed25519</code>；或者直接使用跨平台通用的正斜杠 <code>D:/files/server/id_ed25519</code>。
+推荐直接使用跨平台通用的正斜杠格式，例如 <code>D:/files/server/id_ed25519</code>，Node.js 原生支持且能规避 JSON 字符转义问题；若坚持使用 Windows 传统反斜杠，必须写成双反斜杠转义形式 <code>D:\\files\\server\\id_ed25519</code>。
 </details>
 
 <details>

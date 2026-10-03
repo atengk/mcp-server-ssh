@@ -1,0 +1,32 @@
+# 更新日志 (Changelog)
+
+本项目所有显著变更均记录于此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 规范，版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
+
+---
+
+## [v1.1.0] - 2026-10-03
+
+### 新增 (Added)
+- **安全拦截受控逃生门**：在 `ssh_exec` 中新增 `dangerouslySkipSafetyCheck` 参数，配合环境变量 `SSH_ALLOW_DANGEROUS_COMMANDS=true` 实现双重授权机制，允许运维工程师在必要时受控执行系统重启或维护命令。
+- **建连错误诊断感知**：`ConnectionPool` 记录最近一次建连失败原因 `lastConnectionError`，在 `ssh_list_connections` 中回显并在找不到连接时精准提示具体失败原因。
+- **长任务超时语义化引导**：在 `ssh_exec` 达到 60s 快速熔断时，抛出明确的参数调优引导与 `ssh_session_*` 交互终端模式指引。
+- **供应链 Provenance 签名**：GitHub Actions 发布流水线启用 `npm publish --provenance`，提供由 GitHub Actions OIDC 签发的不可篡改构建来源溯源证明。
+
+### 优化 (Changed)
+- **跨平台路径表达规范**：全文档与所有配置示例统一采用跨平台通用的正斜杠（`/`）规范，彻底规避 JSON 反斜杠双重转义陷阱。
+- **自动化发版流水线**：重构 `release.yml`，在发布 GitHub Release 时自动提取 CHANGELOG.md 内容，并保底注入环境安装指引与安全溯源报告。
+
+---
+
+## [v1.0.0] - 2026-10-03
+
+### 新增 (Added)
+- **零侵入 OpenSSH 直连**：基于标准 OpenSSH 协议直连目标 Linux/Unix 主机，零 Agent、零额外守护进程侵入。
+- **双模命令执行引擎**：
+  - `ssh_exec`：无状态命令执行，默认包装为登录 Shell（`bash -l -c`）完整继承环境变量与 PATH，精确捕获退出码与耗时；
+  - `ssh_session_*`：基于持久 PTY 伪终端的交互式会话流，支持增量回显收集与 `\x03` (Ctrl+C) 中断控制。
+- **全功能 POSIX SFTP 文件套件**：支持文本安全读写（512KB 防爆阈值）、双向极速上传与下载、目录树浏览、POSIX 元数据查询与防环递归删除。
+- **工业级凭证链与网络拓扑**：支持本地私钥（`id_ed25519` / `id_rsa`）、SSH-Agent 探测、密码认证、`~/.ssh/config` 配置解析及企业级 `ProxyJump` 跳板机隧道。
+- **前置安全守卫 (SafetyGuard)**：前置正则匹配强力阻断全盘强删（`rm -rf /`）、块设备覆写（`mkfs`/`dd`）、关机重启（`reboot`/`shutdown`）及 Fork 炸弹等致命操作。
+- **智能防爆截断 (OutputTruncator)**：单次执行输出严格限制 64KB（保留前 8KB 标头与后 56KB 最新日志），自动清洗 ANSI 终端转义字符。
+- **三位一体分发矩阵**：发布至 NPM 官方注册表 `@atengk/mcp-server-ssh`，单文件打包 Bundle，支持 `npx -y @atengk/mcp-server-ssh` 零依赖即开即用。

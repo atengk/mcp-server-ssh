@@ -39,11 +39,19 @@ export class ConnectionPool {
   private clientFactory: () => Client;
   private configParser: SSHConfigParser;
   private credentialResolver: CredentialResolver;
+  private lastConnectionError: string | null = null;
 
   public constructor(options?: ConnectionPoolOptions) {
     this.clientFactory = options?.clientFactory ?? (() => new Client());
     this.configParser = options?.configParser ?? new SSHConfigParser();
     this.credentialResolver = options?.credentialResolver ?? new CredentialResolver();
+  }
+
+  /**
+   * 获取最近一次尝试建立连接失败的错误信息
+   */
+  public getLastConnectionError(): string | null {
+    return this.lastConnectionError;
   }
 
   /**
@@ -54,99 +62,105 @@ export class ConnectionPool {
    * @throws 当网络连接超时、鉴权失败或跳板机不可达时抛出异常
    */
   public async connect(params: SSHConnectParams): Promise<ConnectionInfo> {
-    // 1. 若指定了 Host 别名，优先从 ~/.ssh/config 继承配置
-    let effectiveParams: SSHConnectParams = { ...params };
-    if (params.sshConfigAlias) {
-      const aliasConfig = this.configParser.resolveHost(params.sshConfigAlias);
-      if (aliasConfig) {
-        effectiveParams = { ...aliasConfig, ...params };
+    try {
+      // 1. 若指定了 Host 别名，优先从 ~/.ssh/config 继承配置
+      let effectiveParams: SSHConnectParams = { ...params };
+      if (params.sshConfigAlias) {
+        const aliasConfig = this.configParser.resolveHost(params.sshConfigAlias);
+        if (aliasConfig) {
+          effectiveParams = { ...aliasConfig, ...params };
+        }
       }
-    }
 
-    if (!effectiveParams.host) {
-      throw new Error("无法建立连接：未指定目标主机地址 (host) 且别名解析失败");
-    }
+      if (!effectiveParams.host) {
+        throw new Error("无法建立连接：未指定目标主机地址 (host) 且别名解析失败");
+      }
 
-    // 2. 生成或确定 connectionId
-    const connectionId = effectiveParams.connectionId || `conn_${this.idCounter++}`;
+      // 2. 生成或确定 connectionId
+      const connectionId = effectiveParams.connectionId || `conn_${this.idCounter++}`;
 
-    // 若已存在同名活跃连接，先安全断开旧连接
-    if (this.connections.has(connectionId)) {
-      await this.disconnect(connectionId);
-    }
+      // 若已存在同名活跃连接，先安全断开旧连接
+      if (this.connections.has(connectionId)) {
+        await this.disconnect(connectionId);
+      }
 
-    // 3. 处理 ProxyJump 堡垒机跳板中继
-    let jumpClient: Client | undefined;
-    let streamSocket: any;
+      // 3. 处理 ProxyJump 堡垒机跳板中继
+      let jumpClient: Client | undefined;
+      let streamSocket: any;
 
-    if (effectiveParams.proxyJump) {
-      const jumpTarget = this.parseProxyJumpTarget(effectiveParams.proxyJump);
-      const jumpCreds = await this.credentialResolver.resolve(jumpTarget);
+      if (effectiveParams.proxyJump) {
+        const jumpTarget = this.parseProxyJumpTarget(effectiveParams.proxyJump);
+        const jumpCreds = await this.credentialResolver.resolve(jumpTarget);
 
-      jumpClient = await this.createClientInstance(jumpCreds);
+        jumpClient = await this.createClientInstance(jumpCreds);
 
-      // 通过跳板机发起 direct-tcpip 隧道转发
-      streamSocket = await new Promise((resolve, reject) => {
-        jumpClient!.forwardOut(
-          "127.0.0.1",
-          12345,
-          effectiveParams.host!,
-          effectiveParams.port || 22,
-          (err, stream) => {
-            if (err) {
-              reject(new Error(`跳板机隧道转发建立失败 (${effectiveParams.proxyJump}): ${err.message}`));
-            } else {
-              resolve(stream);
+        // 通过跳板机发起 direct-tcpip 隧道转发
+        streamSocket = await new Promise((resolve, reject) => {
+          jumpClient!.forwardOut(
+            "127.0.0.1",
+            12345,
+            effectiveParams.host!,
+            effectiveParams.port || 22,
+            (err, stream) => {
+              if (err) {
+                reject(new Error(`跳板机隧道转发建立失败 (${effectiveParams.proxyJump}): ${err.message}`));
+              } else {
+                resolve(stream);
+              }
             }
-          }
-        );
+          );
+        });
+      }
+
+      // 4. 解析目标主机的认证凭据与底层连接配置
+      const targetConfig = await this.credentialResolver.resolve(effectiveParams);
+      if (streamSocket) {
+        targetConfig.sock = streamSocket;
+      }
+
+      // 5. 建立最终目标主机连接
+      const client = await this.createClientInstance(targetConfig);
+
+      // 6. 监听断开与异常事件以实施连接池自愈与清理
+      client.on("close", () => {
+        this.handleConnectionClosed(connectionId);
       });
+      client.on("error", (err) => {
+        process.stderr.write(`[mcp-server-ssh] 连接 ${connectionId} 发生异常: ${err.message}\n`);
+      });
+
+      const now = new Date().toISOString();
+      const shouldSetDefault = effectiveParams.setAsDefault ?? (this.defaultConnectionId === null);
+
+      const info: ConnectionInfo = {
+        connectionId,
+        host: effectiveParams.host,
+        port: effectiveParams.port || 22,
+        username: targetConfig.username || "root",
+        isDefault: shouldSetDefault,
+        connectedAt: now,
+        lastActiveAt: now,
+      };
+
+      const managed: ManagedConnection = {
+        id: connectionId,
+        client,
+        info,
+        jumpClient,
+      };
+
+      this.connections.set(connectionId, managed);
+
+      if (shouldSetDefault) {
+        this.setDefaultConnection(connectionId);
+      }
+
+      this.lastConnectionError = null;
+      return info;
+    } catch (err) {
+      this.lastConnectionError = err instanceof Error ? err.message : String(err);
+      throw err;
     }
-
-    // 4. 解析目标主机的认证凭据与底层连接配置
-    const targetConfig = await this.credentialResolver.resolve(effectiveParams);
-    if (streamSocket) {
-      targetConfig.sock = streamSocket;
-    }
-
-    // 5. 建立最终目标主机连接
-    const client = await this.createClientInstance(targetConfig);
-
-    // 6. 监听断开与异常事件以实施连接池自愈与清理
-    client.on("close", () => {
-      this.handleConnectionClosed(connectionId);
-    });
-    client.on("error", (err) => {
-      process.stderr.write(`[mcp-server-ssh] 连接 ${connectionId} 发生异常: ${err.message}\n`);
-    });
-
-    const now = new Date().toISOString();
-    const shouldSetDefault = effectiveParams.setAsDefault ?? (this.defaultConnectionId === null);
-
-    const info: ConnectionInfo = {
-      connectionId,
-      host: effectiveParams.host,
-      port: effectiveParams.port || 22,
-      username: targetConfig.username || "root",
-      isDefault: shouldSetDefault,
-      connectedAt: now,
-      lastActiveAt: now,
-    };
-
-    const managed: ManagedConnection = {
-      id: connectionId,
-      client,
-      info,
-      jumpClient,
-    };
-
-    this.connections.set(connectionId, managed);
-
-    if (shouldSetDefault) {
-      this.setDefaultConnection(connectionId);
-    }
-
-    return info;
   }
 
   /**

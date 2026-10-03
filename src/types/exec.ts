@@ -18,6 +18,10 @@ export const SSHExecParamsSchema = z.object({
   env: z.record(z.string()).optional().describe("注入远程环境的环境变量键值对"),
   dryRun: z.boolean().default(false).describe("是否仅通过安全拦截守卫检测合规性，而不真正下发执行，默认 false"),
   rawExec: z.boolean().default(false).describe("是否绕过登录 Shell 包装（bash -l -c），直接以非登录 Shell 原生执行，默认 false"),
+  dangerouslySkipSafetyCheck: z
+    .boolean()
+    .default(false)
+    .describe("是否强制跳过前置高危安全拦截规则（危险操作逃生门，需同时配置环境变量 SSH_ALLOW_DANGEROUS_COMMANDS=true 授权）"),
 });
 
 export type SSHExecParams = z.infer<typeof SSHExecParamsSchema>;

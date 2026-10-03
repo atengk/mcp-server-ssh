@@ -11,7 +11,7 @@
    - **底座运行层**：发布至 NPM 公共注册表，支持 `npx -y @atengk/mcp-server-ssh` 零依赖即开即用；
    - **源码与交付层**：GitHub 主干管理，配合语义化版本发布 GitHub Releases；
    - **生态收录层**：主动接入 Model Context Protocol 官方生态目录与权威 MCP Catalog（PulseMCP、Glama、Awesome MCP Servers）；
-3. **自动化发布流水线**：配置 GitHub Actions 工作流，在版本打 Tag 时自动执行全量测试、类型检查、单文件 Bundle 编译并推送 NPM。
+3. **自动化发布流水线与 Provenance 来源防伪**：配置 GitHub Actions 工作流，在版本打 Tag 时自动执行全量测试、类型检查、单文件 Bundle 编译，并利用 GitHub OIDC 签名以 `npm publish --access public --provenance` 形式发布 NPM，确立最高级别的软件供应链溯源可信度。
 
 ## 权衡考量 (Considered Options)
 

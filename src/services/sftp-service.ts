@@ -355,8 +355,10 @@ export class SFTPService {
   private async getSFTP(connectionId?: string): Promise<SFTPWrapper> {
     const conn = this.connectionPool.getConnection(connectionId);
     if (!conn) {
+      const lastErr = this.connectionPool.getLastConnectionError();
+      const detail = lastErr ? `。最近一次尝试建连失败原因: ${lastErr}` : "";
       throw new Error(
-        `未找到可用的 SSH 连接 (${connectionId || "默认连接"})，请先通过 ssh_connect 建立连接`
+        `未找到可用的 SSH 连接 (${connectionId || "默认连接"})${detail}，请先通过 ssh_connect 建立连接`
       );
     }
 

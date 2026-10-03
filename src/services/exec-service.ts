@@ -44,8 +44,17 @@ export class ExecService {
   public async execute(params: SSHExecParams): Promise<SSHExecResult> {
     const startTime = Date.now();
 
-    // 1. 前置安全守卫校验
-    this.safetyGuard.assertSafe(params.command);
+    // 1. 前置安全守卫校验（支持环境变量 + 入参双重授权逃生门）
+    if (params.dangerouslySkipSafetyCheck) {
+      const allowDangerous = process.env.SSH_ALLOW_DANGEROUS_COMMANDS === "true";
+      if (!allowDangerous) {
+        throw new Error(
+          "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
+        );
+      }
+    } else {
+      this.safetyGuard.assertSafe(params.command);
+    }
 
     // 2. 若仅为试运行检测 (dryRun)，放行并直接返回测试标记
     if (params.dryRun) {
@@ -62,8 +71,10 @@ export class ExecService {
     // 3. 获取目标或默认活跃物理连接
     const conn = this.connectionPool.getConnection(params.connectionId);
     if (!conn) {
+      const lastErr = this.connectionPool.getLastConnectionError();
+      const detail = lastErr ? `。最近一次尝试建连失败原因: ${lastErr}` : "";
       throw new Error(
-        `未找到可用的 SSH 连接 (${params.connectionId || "默认连接"})，请先通过 ssh_connect 建立连接`
+        `未找到可用的 SSH 连接 (${params.connectionId || "默认连接"})${detail}，请先通过 ssh_connect 建立连接`
       );
     }
 
@@ -110,7 +121,11 @@ export class ExecService {
                 stream.signal("KILL");
               }
             } catch {}
-            reject(new Error(`远程命令执行超时（设定限制为 ${timeoutMs}ms）`));
+            reject(
+              new Error(
+                `远程命令执行超时（设定限制为 ${timeoutMs}ms）。如需执行耗时较长的命令（如编译、打包、下载），请显式指定更长的 timeoutMs 参数，或使用 ssh_session_* 交互终端会话模式。`
+              )
+            );
           }
         }, timeoutMs);
 
