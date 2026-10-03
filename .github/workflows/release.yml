@@ -1,0 +1,56 @@
+name: Release & Publish to NPM
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 pnpm 环境
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: 安装项目依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 静态类型检查
+        run: pnpm typecheck
+
+      - name: 运行单元与端到端测试
+        run: pnpm test
+
+      - name: 生产打包构建
+        run: pnpm build
+
+      - name: 发布至 NPM 注册表
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 创建 GitHub Release 发版
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true
+          files: |
+            dist/index.js
+            dist/index.d.ts

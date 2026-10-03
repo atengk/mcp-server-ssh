@@ -1,8 +1,24 @@
 {
-  "name": "mcp-server-ssh",
-  "version": "0.1.0",
+  "name": "@atengk/mcp-server-ssh",
+  "version": "1.0.0",
   "description": "基于 SSH 协议连接与操控 Linux/Unix 系统的 Model Context Protocol (MCP) 服务",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atengk/mcp-server-ssh.git"
+  },
+  "homepage": "https://github.com/atengk/mcp-server-ssh#readme",
+  "bugs": {
+    "url": "https://github.com/atengk/mcp-server-ssh/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "mcp-server-ssh": "./dist/index.js"
   },

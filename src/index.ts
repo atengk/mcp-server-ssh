@@ -83,7 +83,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
 
   const server = new McpServer({
     name: "mcp-server-ssh",
-    version: "0.1.0",
+    version: "1.0.0",
   });
 
   // 1. 注册基础心跳与连通性检测工具
@@ -97,7 +97,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       const payload = {
         status: "ok",
         service: "mcp-server-ssh",
-        version: "0.1.0",
+        version: "1.0.0",
         echo: message ?? "pong",
         timestamp: new Date().toISOString(),
       };

@@ -49,3 +49,22 @@ _Avoid_: File Path (模糊的文件路径), Windows Path (Windows 反斜杠路�
 **SFTP Subsystem (SFTP 子系统)**:
 运行于 SSH 协议通道内部的标准安全文件传输子协议服务，负责提供原子化的 POSIX 文件读写、属性查询与目录遍历能力。
 _Avoid_: FTP (普通文件传输协议), SCP (已废弃的安全复制协议), WebDAV
+
+### 分发与生态接入 (Distribution & Ecosystem)
+
+**Scoped Package (作用域包)**:
+专指在 NPM 官方公共注册表下以 `@atengk/` 命名空间为前缀的唯一发布包名（`@atengk/mcp-server-ssh`），确立组织唯一所有权并防范供应链混淆。
+_Avoid_: Global Unscoped Package (无作用域全局包), Bare Package
+
+**NPM Registry (分发注册表)**:
+全球 Node.js 官方公共软件包索引与存储服务，允许任何 AI 客户端通过 `npx` 零依赖即开即用拉取 MCP 独立 Bundle。
+_Avoid_: Private Mirror (私有镜像), Code Repository (代码仓库)
+
+**MCP Catalog (生态目录 / 市场)**:
+官方及开源社区设立的公开索引清单与插件发现平台（如 PulseMCP、Glama、Awesome MCP Servers 及官方 Servers 目录），用于使全球开发者在 AI 工具箱中一键发现与安装。
+_Avoid_: App Store (移动应用商店), Extension Marketplace (扩展市场)
+
+**Distribution Matrix (分发矩阵)**:
+由 NPM 独立二进制包、GitHub Releases 语义化版本源码与各大 MCP Catalog 索引收录构成的三位一体立体分发触达网络。
+_Avoid_: Single Channel (单一渠道)
+
