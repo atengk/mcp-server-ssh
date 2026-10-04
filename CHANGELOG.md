@@ -4,6 +4,18 @@
 
 ---
 
+## [v1.2.1] - 2026-10-04
+
+### 新增 (Added)
+- **开源工程化规范基座**：集成 `atengk/oss-template` 最佳实践，引入 `.editorconfig`（统一跨 IDE 编码与缩进）与 `.gitattributes`（强制文本文件跨平台 LF 换行归一化，彻底消除 Windows CRLF 转换冲突）。
+- **开源社区协作契约与模板矩阵**：引入规范的 `CONTRIBUTING.md`（GitHub Flow 与 Conventional Commits 提交指引）、`.github/PULL_REQUEST_TEMPLATE.md`（PR 质量自检清单）以及 `.github/ISSUE_TEMPLATE/`（Bug 反馈与特性建议模板）。
+- **日常持续集成流水线 (CI)**：新增 `.github/workflows/ci.yml`，在代码 Push 到 `main` 分支或发起 PR 时自动执行 Semantic PR 标题规范校验、静态类型检查、单元与集成测试套件及产物完整性构建验证。
+- **GHCR 多架构 Docker 镜像自动发布**：在发布流水线中接入 `publish-docker` Job，在打 Tag 发版时基于 QEMU + Buildx 自动构建 `linux/amd64` 与 `linux/arm64` 双架构镜像并推送至 GitHub Packages (`ghcr.io/atengk/mcp-server-ssh`)。
+- **自动化变更日志配置**：引入 `.cliff.toml` 支持基于 Conventional Commits 的变更日志自动提取与分类，与高质量人工复核的 `CHANGELOG.md` 协同。
+- **架构决策记录**：沉淀 [ADR-0006: 开源工程化规范与全自动流水线基建](docs/adr/0006-oss-template-engineering-standards.md)。
+
+---
+
 ## [v1.2.0] - 2026-10-04
 
 ### 新增 (Added)

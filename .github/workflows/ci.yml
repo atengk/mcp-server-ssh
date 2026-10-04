@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pr-title:
+    name: 校验 PR 标题规范
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    steps:
+      - name: 校验 PR 标题符合 Conventional Commits
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+
+  build-and-test:
+    name: 构建与测试
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 pnpm 环境
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: 安装项目依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 静态类型检查
+        run: pnpm run typecheck
+
+      - name: 运行单元与集成测试
+        run: pnpm test
+
+      - name: 生产打包构建
+        run: pnpm run build
+
+      - name: 验证 Bundle 产物完整性
+        run: |
+          test -f dist/index.js || exit 1
+          test -f dist/index.d.ts || exit 1
+          echo "CI 校验全部通过，产物完整有效。"

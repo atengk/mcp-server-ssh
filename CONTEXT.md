@@ -93,3 +93,18 @@ _Avoid_: Proxy String, Raw Proxy
 **Health Probe (健康检查探针)**:
 在 `sse` 传输模式下由 HTTP 服务在 `/health` 暴露的轻量无状态检测端点，供 Docker、K8s 或负载均衡器探测服务就绪（Readiness）与存活（Liveness）状态。
 _Avoid_: Ping, Heartbeat Endpoint, Status Page
+
+### 开源工程与持续集成规范 (Open Source Engineering & CI/CD)
+
+**Semantic PR Title (语义化 PR 标题)**:
+在 GitHub Pull Request 提交时强制遵循 Conventional Commits 规范的标题格式（`<type>(<scope>): <subject>`），用于自动化流水线提取版本更新日志并保障代码审查意图清晰。
+_Avoid_: Loose PR Title (松散 PR 标题), Freeform PR Name
+
+**GitHub Container Registry (GHCR 容器镜像源)**:
+由 GitHub 官方托管的高性能 OCI 兼容容器镜像注册表（`ghcr.io`），用于自动分发多架构 Docker 镜像，具备与 GitHub 仓库权限原生集成与无缝免密拉取特性。
+_Avoid_: Private Mirror (私有镜像), Generic Hub
+
+**Conventional Changelog Engine (规范化变更日志引擎)**:
+基于标准化提交历史与语义化标签自动抓取、过滤并分类生成发布说明的工具或规则体系（如 git-cliff 与 GitHub Actions 发布工作流）。
+_Avoid_: Manual Changelog (纯手写日志), Random Commit Log
+

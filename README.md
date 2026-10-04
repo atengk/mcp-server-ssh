@@ -1,7 +1,9 @@
 # @atengk/mcp-server-ssh
 
 [![NPM Version](https://img.shields.io/npm/v/@atengk/mcp-server-ssh.svg?style=flat-square)](https://www.npmjs.com/package/@atengk/mcp-server-ssh)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/atengk/mcp-server-ssh/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/atengk/mcp-server-ssh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-1.x-orange.svg?style=flat-square)](https://modelcontextprotocol.io/)
@@ -209,7 +211,7 @@
 {
   "status": "ok",
   "service": "mcp-server-ssh",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "timestamp": "2026-10-04T02:00:00.000Z"
 }
 ```
@@ -240,7 +242,7 @@ docker compose down
 services:
   mcp-server-ssh:
     build: .
-    image: atengk/mcp-server-ssh:1.2.0
+    image: ghcr.io/atengk/mcp-server-ssh:1.2.1
     container_name: mcp-server-ssh
     restart: unless-stopped
     ports:
@@ -265,7 +267,7 @@ services:
 
 ### 2. 使用 Docker CLI 独立运行
 
-亦可直接使用标准 `docker run` 命令启动：
+亦可直接使用标准 `docker run` 命令启动（支持 `linux/amd64` 与 `linux/arm64` 双架构）：
 
 ```bash
 # 方式 A：SSE 远程常驻模式 (后台守护 + 端口映射 + 纯环境变量)
@@ -276,7 +278,7 @@ docker run -d \
   -e MCP_SSH_HOST=192.168.1.100 \
   -e MCP_SSH_USER=root \
   -e MCP_SSH_PASSWORD=your_password \
-  atengk/mcp-server-ssh:1.2.0
+  ghcr.io/atengk/mcp-server-ssh:1.2.1
 
 # 方式 B：本地 stdio 单次管道模式 (宿主机无需安装 Node.js)
 # 客户端直接将 docker run 作为 command 执行，stdio 直接管道透传
@@ -285,7 +287,7 @@ docker run -i --rm \
   -e MCP_SSH_HOST=192.168.1.100 \
   -e MCP_SSH_USER=root \
   -e MCP_SSH_PASSWORD=your_password \
-  atengk/mcp-server-ssh:1.2.0
+  ghcr.io/atengk/mcp-server-ssh:1.2.1
 ```
 
 ---
@@ -514,6 +516,7 @@ flowchart TD
 - [ADR-0003: 前置命令安全拦截与 64KB 双端输出防爆策略](docs/adr/0003-safety-guard-and-output-truncation.md)
 - [ADR-0004: 作用域包命名与三位一体 MCP 生态分发矩阵](docs/adr/0004-distribution-and-registry-strategy.md)
 - [ADR-0005: 规范化环境变量与双传输常驻容器部署](docs/adr/0005-canonical-env-and-sse-containerization.md)
+- [ADR-0006: 开源工程化规范与全自动流水线基建](docs/adr/0006-oss-template-engineering-standards.md)
 
 ---
 
@@ -524,6 +527,12 @@ flowchart TD
 - **Glama MCP Directory**：[glama.co/mcp/servers](https://glama.co/mcp/servers)
 - **PulseMCP Registry**：[pulsemcp.com](https://www.pulsemcp.com)
 - **Awesome MCP Servers**：[punkpeye/awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers)
+
+---
+
+## 🤝 参与贡献 (Contributing)
+
+欢迎任何形式的贡献、优化建议与缺陷反馈！在提交 Pull Request 前请阅读我们的 [贡献指南 (CONTRIBUTING.md)](./CONTRIBUTING.md)。
 
 ---
 
