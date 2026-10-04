@@ -6,12 +6,34 @@
 [changelog]
 header = ""
 body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group }}
 {% for commit in commits %}
 - {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})\
 {% endfor %}
 {% endfor %}\n
+---
+### 📦 快速免安装运行 (Quick Start)
+在任何支持 MCP 的宿主（Claude Desktop, Cursor, Antigravity, Cline 等）中直接配置：
+```bash
+npx -y @atengk/mcp-server-ssh
+```
+
+### 🐳 官方多架构 Docker 镜像 (GHCR)
+```bash
+docker run -d -p 8000:8000 ghcr.io/atengk/mcp-server-ssh:latest
+```
+
+### 🔗 相关资产与生态链接
+- 📦 **NPM Registry**: [https://www.npmjs.com/package/@atengk/mcp-server-ssh](https://www.npmjs.com/package/@atengk/mcp-server-ssh)
+- 🐳 **GHCR Packages**: [https://github.com/atengk/mcp-server-ssh/pkgs/container/mcp-server-ssh](https://github.com/atengk/mcp-server-ssh/pkgs/container/mcp-server-ssh)
+- 🛡️ **Provenance 验证**: 本次构建由 GitHub Actions 原生 OIDC 签发不可篡改的 Provenance 来源凭据
+- 📖 **完整文档与示例**: [https://github.com/atengk/mcp-server-ssh#readme](https://github.com/atengk/mcp-server-ssh#readme)
 """
 trim = true
 

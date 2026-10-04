@@ -87,4 +87,7 @@
    - 自动运行全量类型检查、测试与生产构建；
    - 自动发布至 NPM 官方注册表，并由 GitHub Actions 原生 OIDC 签发不可篡改的 **Provenance 供应链来源证明**；
    - 自动构建 `linux/amd64` 与 `linux/arm64` 多架构 Docker 镜像并推送至 GitHub Container Registry (`ghcr.io/atengk/mcp-server-ssh`)；
-   - 自动提取版本变更记录创建 GitHub Release 并挂载生产产物附件。
+   - 由 `git-cliff` 基于 Conventional Commits 自动提取变更日志，创建 GitHub Release 并挂载生产产物附件。
+
+> 💡 **更新日志免维护说明**：
+> 本项目**完全无需手动维护 `CHANGELOG.md`**，所有版本的详细变更记录均由 `git-cliff` 依据提交信息自动归纳并发布至 [GitHub Releases](https://github.com/atengk/mcp-server-ssh/releases)。请规范书写提交信息（如 `feat(...)`, `fix(...)`），系统发版时会自动记录并致谢！

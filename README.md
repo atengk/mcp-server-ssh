@@ -1,6 +1,7 @@
 # @atengk/mcp-server-ssh
 
 [![NPM Version](https://img.shields.io/npm/v/@atengk/mcp-server-ssh.svg?style=flat-square)](https://www.npmjs.com/package/@atengk/mcp-server-ssh)
+[![Release](https://img.shields.io/github/v/release/atengk/mcp-server-ssh?style=flat-square)](https://github.com/atengk/mcp-server-ssh/releases)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/atengk/mcp-server-ssh/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/atengk/mcp-server-ssh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
@@ -10,6 +11,8 @@
 [![Tests](https://img.shields.io/badge/tests-112%2F112%20passing-brightgreen.svg?style=flat-square)](./src)
 
 基于标准 **OpenSSH 协议** 深度连接与操控 Linux/Unix 系统的 **Model Context Protocol (MCP)** 服务。为大语言模型（LLM）和 AI 智能体（Claude Desktop、Cursor、Antigravity、Cline 等）提供安全、可控、零侵入的远程终端执行与 POSIX 文件系统管理基础设施。
+
+> 💡 **版本更新日志 (Release Notes)**：每一个正式版本的详细变动明细、修复记录与贡献者致谢均由系统自动维护，可直接前往 [GitHub Releases](https://github.com/atengk/mcp-server-ssh/releases) 查看最新记录。
 
 ---
 
