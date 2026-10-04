@@ -1,7 +1,8 @@
 # ==========================================
 # Stage 1: 构建阶段 (Builder)
+# 使用 --platform=$BUILDPLATFORM 确保构建在原生架构上高速执行
 # ==========================================
-FROM node:20-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /build
 

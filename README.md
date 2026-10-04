@@ -211,7 +211,7 @@
 {
   "status": "ok",
   "service": "mcp-server-ssh",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "timestamp": "2026-10-04T02:00:00.000Z"
 }
 ```
@@ -242,7 +242,7 @@ docker compose down
 services:
   mcp-server-ssh:
     build: .
-    image: ghcr.io/atengk/mcp-server-ssh:1.2.2
+    image: ghcr.io/atengk/mcp-server-ssh:1.2.3
     container_name: mcp-server-ssh
     restart: unless-stopped
     ports:
@@ -278,7 +278,7 @@ docker run -d \
   -e MCP_SSH_HOST=192.168.1.100 \
   -e MCP_SSH_USER=root \
   -e MCP_SSH_PASSWORD=your_password \
-  ghcr.io/atengk/mcp-server-ssh:1.2.2
+  ghcr.io/atengk/mcp-server-ssh:1.2.3
 
 # 方式 B：本地 stdio 单次管道模式 (宿主机无需安装 Node.js)
 # 客户端直接将 docker run 作为 command 执行，stdio 直接管道透传
@@ -287,7 +287,7 @@ docker run -i --rm \
   -e MCP_SSH_HOST=192.168.1.100 \
   -e MCP_SSH_USER=root \
   -e MCP_SSH_PASSWORD=your_password \
-  ghcr.io/atengk/mcp-server-ssh:1.2.2
+  ghcr.io/atengk/mcp-server-ssh:1.2.3
 ```
 
 ---
