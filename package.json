@@ -1,6 +1,6 @@
 {
   "name": "@atengk/mcp-server-ssh",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "基于 SSH 协议连接与操控 Linux/Unix 系统的 Model Context Protocol (MCP) 服务",
   "type": "module",
   "publishConfig": {

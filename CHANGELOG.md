@@ -4,6 +4,13 @@
 
 ---
 
+## [v1.2.2] - 2026-10-04
+
+### 修复 (Fixed)
+- **多架构 Docker 镜像构建适配**：修复 `Dockerfile` 中 corepack 动态拉取最新 pnpm 导致的构建中断问题，将版本严格固定为与工程 lockfile 及 CI 环境一致的 `pnpm@9`，保障 `linux/amd64` 与 `linux/arm64` 双架构镜像顺利完成交叉编译并自动发布至 GHCR。
+
+---
+
 ## [v1.2.1] - 2026-10-04
 
 ### 新增 (Added)

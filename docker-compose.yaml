@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/atengk/mcp-server-ssh:1.2.1
+    image: ghcr.io/atengk/mcp-server-ssh:1.2.2
     container_name: mcp-server-ssh
     restart: unless-stopped
     ports:

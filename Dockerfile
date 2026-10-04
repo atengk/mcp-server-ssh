@@ -5,8 +5,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /build
 
-# 启用并安装 pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# 启用并安装 pnpm (固定主版本为 9，与 lockfile 及 CI 环境保持一致)
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # 优先复制依赖清单以最大化利用 Docker 缓存层
 COPY package.json pnpm-lock.yaml tsconfig.json tsup.config.ts ./
