@@ -1,13 +1,17 @@
 services:
   mcp-server-ssh:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ghcr.io/atengk/mcp-server-ssh:1.2.3
+    # 官方预构建多架构镜像 (由 GitHub Actions 自动发布，全平台支持 linux/amd64 与 linux/arm64)
+    # 默认采用 latest 标签，支持 docker compose pull 平滑升级；亦可固定版本 (如 :1.2.3)
+    image: ghcr.io/atengk/mcp-server-ssh:${MCP_SSH_IMAGE_TAG:-latest}
     container_name: mcp-server-ssh
     restart: unless-stopped
     ports:
       - "8000:8000"
+
+    # 可选: 若需基于本地源码二次开发调试，可解除下方 build 注释
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     environment:
       # 1. 通信协议与服务监听设置 (容器常驻推荐启用 sse)
       - MCP_SSH_TRANSPORT=sse

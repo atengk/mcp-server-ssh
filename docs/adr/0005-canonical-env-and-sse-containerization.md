@@ -18,9 +18,9 @@
    - 通过 `MCP_SSH_TRANSPORT` 环境变量在 `stdio` 与 `sse` 之间自由切换；
    - 本地桌面客户端维持默认零开销的 `stdio` 模式；
    - 容器常驻环境采用 `sse` 模式，基于 Node.js 原生 `http` 启动轻量服务，暴露 `/sse`（事件流建立）与 `/message`（JSON-RPC 交互）端点，支持 CORS 与优雅停机。
-4. **多阶段轻量 Dockerfile 与 Docker Compose 编排**：
-   - 采用多阶段构建，基于 `node:20-alpine`，运行于非 root 用户 `node`，最小化镜像攻击面；
-   - 根目录提供开箱即用的 `docker-compose.yaml`，支持 `docker compose up -d` 一键拉起常驻服务。
+4. **多阶段轻量 Dockerfile 与单文件预构建编排**：
+   - 采用多阶段构建（构建阶段使用 `--platform=$BUILDPLATFORM` 加速），基于 `node:20-alpine`，运行于非 root 用户 `node`，最小化镜像攻击面；
+   - 根目录 `docker-compose.yaml` 默认直接消费云端 GHCR 预构建镜像（`ghcr.io/atengk/mcp-server-ssh:${MCP_SSH_IMAGE_TAG:-latest}`），彻底与本地源码及编译环境解耦，支持终端用户零源码、单文件秒级一键拉起与平滑升级。
 5. **基于会话工厂的多客户端并发隔离 (Server Factory Pattern)**：
    - 针对 `@modelcontextprotocol/sdk` 的 Server 实例强绑定单 Transport 的底层限制，在 SSE 服务层引入 `serverFactory` 工厂模式，在每个 HTTP 客户端接入握手时动态生成独立的 McpServer 实例，底层共享 `ConnectionPool` 物理连接池，实现多客户端并发接入且会话生命周期互不干扰。
 

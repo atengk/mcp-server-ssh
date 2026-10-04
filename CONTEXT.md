@@ -108,3 +108,8 @@ _Avoid_: Private Mirror (私有镜像), Generic Hub
 基于标准化提交历史与语义化标签自动抓取、过滤并分类生成发布说明的工具或规则体系（如 git-cliff 与 GitHub Actions 发布工作流）。
 _Avoid_: Manual Changelog (纯手写日志), Random Commit Log
 
+**Pre-built Container Image (预构建容器镜像)**:
+由 GitHub Actions CI/CD 流水线在发版时自动编译、测试并推送至 GHCR 的开箱即用多架构 OCI 镜像制品，终端用户无需克隆本地源码及安装编译工具链即可单文件直接拉起。
+_Avoid_: Source Build (本地源码构建), Dynamic Image
+
+

@@ -214,7 +214,7 @@
 {
   "status": "ok",
   "service": "mcp-server-ssh",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "timestamp": "2026-10-04T02:00:00.000Z"
 }
 ```
@@ -223,29 +223,28 @@
 
 ## 🐳 生产环境容器化常驻部署 (Docker & Docker Compose)
 
-针对内网私有云、家庭服务器、NAS 或 Linux 服务器，项目提供官方生产级 [`Dockerfile`](Dockerfile) 与 [`docker-compose.yaml`](docker-compose.yaml)，支持 **100% 纯环境变量免挂载无参启动**。
+项目已由 GitHub Actions CI/CD 自动构建并发布官方多架构镜像（全平台支持 `linux/amd64` 与 `linux/arm64`，适配 Intel/AMD x86 服务器、Mac M系列及树莓派/ARM 云主机）。**无需克隆源码仓库，只需单文件配置即可一键秒级拉起常驻守护服务**。
 
 ### 1. 使用 Docker Compose 一键拉起（推荐 ⭐⭐⭐⭐⭐）
 
-在项目根目录下直接启动常驻守护容器：
+无需下载整个代码库，仅需下载或新建 `docker-compose.yaml` 即可常驻运行：
 
 ```bash
-# 1. 启动常驻服务
-docker compose up -d
+# 方式 A：单行命令直接从 GitHub 拉取配置并启动服务
+curl -fsSL https://raw.githubusercontent.com/atengk/mcp-server-ssh/main/docker-compose.yaml -o docker-compose.yaml && docker compose up -d
 
-# 2. 查看服务运行日志
-docker compose logs -f
-
-# 3. 停止服务
-docker compose down
+# 常用运维命令
+docker compose logs -f    # 查看服务实时日志
+docker compose pull       # 一键更新至官方最新镜像
+docker compose down       # 优雅停止服务
 ```
 
-`docker-compose.yaml` 核心配置解析：
+`docker-compose.yaml` 核心配置参考：
 ```yaml
 services:
   mcp-server-ssh:
-    build: .
-    image: ghcr.io/atengk/mcp-server-ssh:1.2.3
+    # 官方预构建多架构镜像 (默认最新版，亦可指定具体版本如 :1.2.3)
+    image: ghcr.io/atengk/mcp-server-ssh:${MCP_SSH_IMAGE_TAG:-latest}
     container_name: mcp-server-ssh
     restart: unless-stopped
     ports:
@@ -256,7 +255,7 @@ services:
       - MCP_SSH_SERVER_HOST=0.0.0.0
       - MCP_SSH_SERVER_PORT=8000
 
-      # 默认目标服务器凭据 (免文件挂载)
+      # 默认目标服务器凭据 (纯环境变量注入，免文件挂载)
       - MCP_SSH_HOST=192.168.1.100
       - MCP_SSH_PORT=22
       - MCP_SSH_USER=root
