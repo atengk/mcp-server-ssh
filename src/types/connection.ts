@@ -8,6 +8,20 @@
 import { z } from "zod";
 
 /**
+ * 结构化跳板机 / 堡垒机连接与凭据配置 Schema
+ */
+export const ProxyJumpOptionsSchema = z.object({
+  host: z.string().min(1, "跳板机主机地址不能为空").describe("跳板机主机名或 IP 地址"),
+  port: z.number().int().min(1).max(65535).default(22).describe("跳板机 SSH 端口，默认 22"),
+  username: z.string().optional().describe("跳板机登录用户名"),
+  password: z.string().optional().describe("跳板机登录密码"),
+  privateKey: z.string().optional().describe("跳板机专用 PEM 私钥内容、Base64 或本地文件路径"),
+  passphrase: z.string().optional().describe("若跳板机私钥受密码保护，提供解密口令"),
+});
+
+export type ProxyJumpOptions = z.infer<typeof ProxyJumpOptionsSchema>;
+
+/**
  * 建立 SSH 连接参数 Schema
  */
 export const SSHConnectParamsSchema = z.object({
@@ -18,9 +32,14 @@ export const SSHConnectParamsSchema = z.object({
   privateKey: z.string().optional().describe("PEM/OpenSSH 格式的私钥内容，或私钥文件的本地绝对路径"),
   passphrase: z.string().optional().describe("若私钥受密码保护，提供解密口令"),
   sshConfigAlias: z.string().optional().describe("本地 ~/.ssh/config 中配置的 Host 别名（如 prod-server）"),
-  proxyJump: z.string().optional().describe("跳板机 / 堡垒机别名或连接配置（格式形如 user@bastion:22）"),
+  proxyJump: z
+    .union([z.string(), ProxyJumpOptionsSchema])
+    .optional()
+    .describe("跳板机别名、连接字符串 (user@bastion:22) 或结构化认证凭据配置"),
   connectionId: z.string().optional().describe("自定义连接标识符，未指定则自动分配唯一 ID"),
   setAsDefault: z.boolean().default(true).describe("是否将该连接设为后续操作的默认活跃连接，默认 true"),
+  readyTimeout: z.number().int().positive().optional().describe("建立连接就绪握手超时时间（毫秒），默认 30000"),
+  keepaliveInterval: z.number().int().positive().optional().describe("心跳保活检测发送间隔（毫秒），默认 10000"),
 });
 
 export type SSHConnectParams = z.infer<typeof SSHConnectParamsSchema>;

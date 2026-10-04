@@ -11,7 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/manager.js";
-import { createMCPServer } from "./index.js";
+import { createMCPServer, startServer } from "./index.js";
 
 class MockChannelStream extends EventEmitter {
   public stdout = new EventEmitter();
@@ -248,6 +248,23 @@ Host test-alias
     const listData = JSON.parse((listRes.content[0] as any).text);
     expect(listData.items).toHaveLength(1);
     expect(listData.items[0].name).toBe("test.txt");
+  });
+
+  it("应当支持通过 startServer 以 SSE 模式启动并完成健康检查与优雅关闭", async () => {
+    const sseConfig = {
+      transport: "sse" as const,
+      serverHost: "127.0.0.1",
+      serverPort: 0,
+      timeoutMs: 30000,
+      keepAliveIntervalMs: 10000,
+      allowDangerousCommands: false,
+    };
+
+    const stop = await startServer(pool, sseConfig);
+    expect(typeof stop).toBe("function");
+
+    // 优雅关闭
+    await stop();
   });
 });
 

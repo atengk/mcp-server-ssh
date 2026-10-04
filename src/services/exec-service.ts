@@ -46,10 +46,12 @@ export class ExecService {
 
     // 1. 前置安全守卫校验（支持环境变量 + 入参双重授权逃生门）
     if (params.dangerouslySkipSafetyCheck) {
-      const allowDangerous = process.env.SSH_ALLOW_DANGEROUS_COMMANDS === "true";
+      const allowDangerous =
+        process.env.MCP_SSH_ALLOW_DANGEROUS_COMMANDS === "true" ||
+        process.env.SSH_ALLOW_DANGEROUS_COMMANDS === "true";
       if (!allowDangerous) {
         throw new Error(
-          "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
+          "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
         );
       }
     } else {

@@ -38,9 +38,9 @@ export class CredentialResolver {
       host: params.host || "localhost",
       port: params.port || 22,
       username,
-      keepaliveInterval: 10000,
+      keepaliveInterval: params.keepaliveInterval ?? 10000,
       keepaliveCountMax: 3,
-      readyTimeout: 30000,
+      readyTimeout: params.readyTimeout ?? 30000,
     };
 
     // 1. 若显式提供了密码
@@ -99,6 +99,23 @@ export class CredentialResolver {
       } catch {
         // 若读取文件失败，回退尝试视为原始文本
       }
+    }
+
+    // 若未直接包含 -----BEGIN，尝试检测是否为 Base64 编码的私钥
+    if (!privateKeyInput.includes("-----BEGIN")) {
+      try {
+        const decoded = Buffer.from(privateKeyInput.trim(), "base64").toString("utf-8");
+        if (decoded.includes("-----BEGIN")) {
+          return decoded;
+        }
+      } catch {
+        // 忽略 Base64 解码异常
+      }
+    }
+
+    // 针对字面量 \n 转义字符进行换行还原
+    if (privateKeyInput.includes("\\n")) {
+      return privateKeyInput.replace(/\\n/g, "\n");
     }
 
     return privateKeyInput;

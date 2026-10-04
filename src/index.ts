@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import dotenv from "dotenv";
 import { z } from "zod";
+import { getPreConnectParams, parseEnv } from "./config/env.js";
 import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/manager.js";
 import { SafetyGuard } from "./security/guard.js";
@@ -36,6 +37,15 @@ import {
 
 // 1. 初始化环境变量配置
 dotenv.config();
+
+import { startSSEServer, type RunningSSEServer, type SSEServerOptions } from "./server/sse-server.js";
+
+export { getPreConnectParams, maskSensitiveConfig, parseEnv } from "./config/env.js";
+export type { AppConfig, ProxyJumpConfig, TargetHostConfig, TransportMode } from "./config/env.js";
+export { startSSEServer };
+export type { RunningSSEServer, SSEServerOptions };
+export { ConnectionPool } from "./connection/manager.js";
+export { SSHConfigParser } from "./connection/config-parser.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -614,22 +624,14 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
  * 依据环境变量自动预建立默认主机连接
  */
 async function autoConnectDefaultHost(pool: ConnectionPool): Promise<void> {
-  const host = process.env.SSH_HOST;
-  const alias = process.env.SSH_CONFIG_ALIAS;
+  const config = parseEnv();
+  const preConnectParams = getPreConnectParams(config);
 
-  if (host || alias) {
+  if (preConnectParams) {
+    const targetLabel = preConnectParams.sshConfigAlias || preConnectParams.host || "default";
     try {
-      process.stderr.write(`[mcp-server-ssh] 检测到默认主机配置，正在尝试自动建连 (${alias || host})...\n`);
-      const info = await pool.connect({
-        host,
-        port: process.env.SSH_PORT ? Number.parseInt(process.env.SSH_PORT, 10) : 22,
-        username: process.env.SSH_USER,
-        password: process.env.SSH_PASSWORD,
-        privateKey: process.env.SSH_KEY_PATH,
-        passphrase: process.env.SSH_KEY_PASSPHRASE,
-        sshConfigAlias: alias,
-        setAsDefault: true,
-      });
+      process.stderr.write(`[mcp-server-ssh] 检测到默认主机配置，正在尝试自动建连 (${targetLabel})...\n`);
+      const info = await pool.connect(preConnectParams);
       process.stderr.write(`[mcp-server-ssh] 默认主机自动建连成功: ${info.connectionId} -> ${info.host}\n`);
     } catch (err) {
       process.stderr.write(
@@ -640,31 +642,68 @@ async function autoConnectDefaultHost(pool: ConnectionPool): Promise<void> {
 }
 
 /**
- * 启动 Stdio 通信传输并监听请求
+ * 启动 MCP 服务通信传输并监听请求 (支持 stdio 与 sse 双模)
+ *
+ * @param customPool 可选注入的底层连接池实例
+ * @param customConfig 可选注入的应用全局配置
+ * @return 优雅停机控制器函数
  */
-export async function startServer(): Promise<void> {
+export async function startServer(
+  customPool?: ConnectionPool,
+  customConfig?: ReturnType<typeof parseEnv>
+): Promise<() => Promise<void>> {
+  const config = customConfig ?? parseEnv();
   const configParser = new SSHConfigParser();
-  const pool = new ConnectionPool({ configParser });
+  const pool = customPool ?? new ConnectionPool({ configParser });
   const server = createMCPServer({ connectionPool: pool, configParser });
-  const transport = new StdioServerTransport();
 
-  // 1. 尝试环境变量自动建连
+  // 1. 依据环境变量自动预建立默认主机连接
   await autoConnectDefaultHost(pool);
 
-  // 2. 优雅停机信号处理
+  let sseInstance: RunningSSEServer | undefined;
+  let isShuttingDown = false;
+
   const shutdown = async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
     process.stderr.write("[mcp-server-ssh] 正在优雅关闭所有连接与服务...\n");
+    if (sseInstance) {
+      await sseInstance.close();
+    }
     await pool.closeAll();
     await server.close();
+  };
+
+  const onSignal = async () => {
+    await shutdown();
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
 
-  process.stderr.write("[mcp-server-ssh] 服务正在通过 stdio 启动...\n");
-  await server.connect(transport);
-  process.stderr.write("[mcp-server-ssh] 服务已就绪，正在监听 JSON-RPC 消息\n");
+  // 2. 根据传输模式路由分发
+  if (config.transport === "sse") {
+    process.stderr.write(
+      `[mcp-server-ssh] 服务正在通过 SSE HTTP 模式启动 (${config.serverHost}:${config.serverPort})...\n`
+    );
+    sseInstance = await startSSEServer({
+      serverFactory: () => createMCPServer({ connectionPool: pool, configParser }),
+      host: config.serverHost,
+      port: config.serverPort,
+      serviceVersion: "1.1.0",
+    });
+    process.stderr.write(
+      `[mcp-server-ssh] SSE HTTP 服务已就绪: http://${config.serverHost}:${sseInstance.port}/sse\n`
+    );
+  } else {
+    const transport = new StdioServerTransport();
+    process.stderr.write("[mcp-server-ssh] 服务正在通过 stdio 启动...\n");
+    await server.connect(transport);
+    process.stderr.write("[mcp-server-ssh] 服务已就绪，正在监听 JSON-RPC 消息\n");
+  }
+
+  return shutdown;
 }
 
 // 非测试环境下自动启动服务

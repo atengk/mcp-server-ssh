@@ -94,4 +94,25 @@ describe("ConnectionPool 连接池管理器", () => {
     expect(pool.listConnections()).toHaveLength(0);
     expect(pool.getConnection()).toBeUndefined();
   });
+
+  it("应当支持传入结构化的 ProxyJumpOptions 对象穿透跳板机", async () => {
+    const pool = new ConnectionPool({
+      clientFactory: () => new MockSSH2Client() as any,
+    });
+
+    const info = await pool.connect({
+      host: "10.0.1.50",
+      username: "internal-user",
+      proxyJump: {
+        host: "bastion.example.com",
+        port: 2222,
+        username: "bastion-user",
+        password: "bastion-password",
+      },
+    });
+
+    expect(info.host).toBe("10.0.1.50");
+    const managed = pool.getConnection(info.connectionId);
+    expect(managed?.jumpClient).toBeDefined();
+  });
 });

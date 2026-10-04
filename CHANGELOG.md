@@ -4,6 +4,22 @@
 
 ---
 
+## [v1.2.0] - 2026-10-04
+
+### 新增 (Added)
+- **12-Factor App 标准环境变量解析中枢**：引入统一规范前缀 `MCP_SSH_*` 环境变量矩阵，提供严格强类型解析与边界诊断，同时 100% 透明向下兼容遗留的 `SSH_*` 环境变量。
+- **多形态私钥免挂载注入**：支持本地文件路径（`MCP_SSH_KEY_PATH`）、PEM 多行文本自动换行还原（`MCP_SSH_PRIVATE_KEY`）及 Base64 编码字符串自动解码（`MCP_SSH_PRIVATE_KEY_BASE64`），彻底实现容器化零磁盘卷挂载启动。
+- **双模通信传输引擎 (Stdio + HTTP SSE)**：支持通过 `MCP_SSH_TRANSPORT=sse` 启动轻量原生 HTTP 服务（默认 8000 端口），暴露 `/sse`（长轮询事件流）、`/message`（JSON-RPC 交互）及 `/health`（服务就绪探针）端点，支持远程网络客户端无缝接入。
+- **生产级轻量容器化编排**：新增 Alpine 多阶段构建 `Dockerfile`（非 root 用户 `node` 运行，内置原生健康检查探针）与开箱即用的 `docker-compose.yaml`（`docker compose up -d` 常驻守护）。
+- **SSE 会话工厂并发隔离**：在 SSE 服务层重构引入 `serverFactory` 机制，为每个接入的 HTTP 客户端动态生成专属 McpServer 实例，消除底层 SDK 单连接限制，实现多客户端并发接入与会话生命周期独立销毁。
+- **结构化跳板机与高级连接参数贯通**：`ssh_connect` 扩充 `readyTimeout` 与 `keepaliveInterval` 参数，`proxyJump` 升级支持结构化对象配置（可为跳板机独立指定端口、用户、密码及私钥凭据）。
+
+### 优化 (Changed)
+- **敏感凭证脱敏防护**：日志输出与诊断信息全面实施全链路凭据掩码脱敏（`***`），严禁密码与私钥在任何日志中泄露。
+- **多主机预连接体验**：服务启动阶段支持依据规范环境变量自动初始化并建立默认连接（Default Connection），免除客户端手动调用建连指令。
+
+---
+
 ## [v1.1.0] - 2026-10-03
 
 ### 新增 (Added)

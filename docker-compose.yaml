@@ -1,0 +1,46 @@
+services:
+  mcp-server-ssh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: atengk/mcp-server-ssh:1.2.0
+    container_name: mcp-server-ssh
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 1. 通信协议与服务监听设置 (容器常驻推荐启用 sse)
+      - MCP_SSH_TRANSPORT=sse
+      - MCP_SSH_SERVER_HOST=0.0.0.0
+      - MCP_SSH_SERVER_PORT=8000
+
+      # 2. 默认目标服务器预建连配置 (方式 A: 纯环境变量直连，无需挂载物理文件)
+      - MCP_SSH_HOST=192.168.1.100
+      - MCP_SSH_PORT=22
+      - MCP_SSH_USER=root
+      - MCP_SSH_PASSWORD=your_secure_password
+
+      # 方式 B: 若使用私钥文本直接注入 (支持字面量 \n 自动换行还原，免挂载)
+      # - MCP_SSH_PRIVATE_KEY="-----BEGIN OPENSSH PRIVATE KEY-----\nMIGfMA0GCS...\n-----END OPENSSH PRIVATE KEY-----"
+
+      # 方式 C: 若使用 Base64 编码私钥 (极佳的多行换行避坑方式，免挂载)
+      # - MCP_SSH_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTi...
+
+      # 可选: 若私钥设置了解密口令
+      # - MCP_SSH_KEY_PASSPHRASE=optional_passphrase
+
+      # 3. 企业级 ProxyJump 堡垒机/跳板机穿透预配置 (可选)
+      # - MCP_SSH_PROXY_HOST=bastion.example.com
+      # - MCP_SSH_PROXY_PORT=22
+      # - MCP_SSH_PROXY_USER=jumpuser
+      # - MCP_SSH_PROXY_PASSWORD=jump_password
+      # - MCP_SSH_PROXY_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTi...
+
+      # 4. 高级连接控制与安全防护
+      - MCP_SSH_TIMEOUT=30000
+      - MCP_SSH_KEEP_ALIVE_INTERVAL=10000
+      - MCP_SSH_ALLOW_DANGEROUS_COMMANDS=false
+
+    volumes:
+      # 方式 D (可选): 若需要直接复用宿主机 ~/.ssh/ 目录下的已有密钥或 config 文件 (只读挂载)
+      # - ~/.ssh:/home/node/.ssh:ro

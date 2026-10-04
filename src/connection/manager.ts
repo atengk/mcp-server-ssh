@@ -6,7 +6,7 @@
  */
 
 import { Client, type ConnectConfig } from "ssh2";
-import type { ConnectionInfo, SSHConnectParams } from "../types/connection.js";
+import type { ConnectionInfo, ProxyJumpOptions, SSHConnectParams } from "../types/connection.js";
 import { SSHConfigParser } from "./config-parser.js";
 import { CredentialResolver } from "./credentials.js";
 
@@ -302,9 +302,21 @@ export class ConnectionPool {
   }
 
   /**
-   * 解析 ProxyJump 字符串为连接参数（如 "bastion" 或 "user@10.0.0.1:2222"）
+   * 解析 ProxyJump 连接参数（支持结构化配置对象、别名或 "user@host:port" 字符串）
    */
-  private parseProxyJumpTarget(proxyJump: string): SSHConnectParams {
+  private parseProxyJumpTarget(proxyJump: string | ProxyJumpOptions): SSHConnectParams {
+    if (typeof proxyJump === "object" && proxyJump !== null) {
+      return {
+        host: proxyJump.host,
+        port: proxyJump.port,
+        username: proxyJump.username,
+        password: proxyJump.password,
+        privateKey: proxyJump.privateKey,
+        passphrase: proxyJump.passphrase,
+        setAsDefault: false,
+      };
+    }
+
     const aliasResolved = this.configParser.resolveHost(proxyJump);
     if (aliasResolved) {
       return aliasResolved;

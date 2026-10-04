@@ -64,6 +64,44 @@ describe("CredentialResolver 凭证解析器", () => {
     expect(config.password).toBe("plain-password");
   });
 
+  it("应当支持直接提供 Base64 编码的密钥字符串并自动解码为原始 PEM", async () => {
+    const resolver = new CredentialResolver();
+    const rawPem = "-----BEGIN RSA PRIVATE KEY-----\nBASE64DECODED\n-----END RSA PRIVATE KEY-----";
+    const base64Key = Buffer.from(rawPem, "utf-8").toString("base64");
+    const config = await resolver.resolve({
+      host: "10.0.0.1",
+      username: "testuser",
+      privateKey: base64Key,
+    });
+
+    expect(config.privateKey?.toString()).toBe(rawPem);
+  });
+
+  it("应当自动将 PEM 密钥中转义的字面量 \\n 还原为真实换行", async () => {
+    const resolver = new CredentialResolver();
+    const escapedPem = "-----BEGIN RSA PRIVATE KEY-----\\nLINE1\\nLINE2\\n-----END RSA PRIVATE KEY-----";
+    const expected = "-----BEGIN RSA PRIVATE KEY-----\nLINE1\nLINE2\n-----END RSA PRIVATE KEY-----";
+    const config = await resolver.resolve({
+      host: "10.0.0.1",
+      username: "testuser",
+      privateKey: escapedPem,
+    });
+
+    expect(config.privateKey?.toString()).toBe(expected);
+  });
+
+  it("应当正确传递自定义的 readyTimeout 与 keepaliveInterval 至底层配置", async () => {
+    const resolver = new CredentialResolver();
+    const config = await resolver.resolve({
+      host: "10.0.0.1",
+      readyTimeout: 45000,
+      keepaliveInterval: 15000,
+    });
+
+    expect(config.readyTimeout).toBe(45000);
+    expect(config.keepaliveInterval).toBe(15000);
+  });
+
   it("当未显式指定用户名时，应当兜底使用宿主机当前操作系统的用户名", async () => {
     const resolver = new CredentialResolver();
     const config = await resolver.resolve({

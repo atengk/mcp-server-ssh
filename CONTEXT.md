@@ -68,3 +68,28 @@ _Avoid_: App Store (移动应用商店), Extension Marketplace (扩展市场)
 由 NPM 独立二进制包、GitHub Releases 语义化版本源码与各大 MCP Catalog 索引收录构成的三位一体立体分发触达网络。
 _Avoid_: Single Channel (单一渠道)
 
+### 传输协议与云原生部署 (Transport & Containerization)
+
+**Transport Mode (传输模式)**:
+MCP 服务端与 AI 客户端之间进行 JSON-RPC 消息交换的底层通信协议承载形态。本项目支持进程间标准输入输出管道 (`stdio`) 与网络长轮询事件流 (`sse`) 两种模式。
+_Avoid_: Protocol (协议混称), Communication Method (通信方式)
+
+**SSE Endpoint (SSE 网络端点)**:
+在 `sse` 传输模式下，轻量 HTTP 服务对外暴露的标准接口，专指用于建立长轮询事件流的 `/sse` 路由与用于接收客户端 JSON-RPC 消息的 `/message` 路由。
+_Avoid_: HTTP API, Webhook, REST Route
+
+**Canonical Environment Variable (标准规范环境变量)**:
+遵循 12-Factor App 体系、以 `MCP_SSH_*` 为唯一官方命名空间的一等公民环境变量，具备最高解析优先级与强类型校验约束。
+_Avoid_: Raw Env, Config Key, Config Flag
+
+**Pre-connection (预连接)**:
+在 MCP 服务初始化启动阶段，依据规范环境变量（`MCP_SSH_*`）自动建立并指定为默认活跃通道的 SSH 物理连接机制。
+_Avoid_: Auto Connect (模糊的自动建连), Static Connection (静态连接)
+
+**Structured ProxyJump (结构化跳板机配置)**:
+将跳板机主机名、端口与专用鉴权凭据（独立用户、密码或私钥）封装为强类型对象的跳板机配置模式，以区别于非结构化的单行连接字符串。
+_Avoid_: Proxy String, Raw Proxy
+
+**Health Probe (健康检查探针)**:
+在 `sse` 传输模式下由 HTTP 服务在 `/health` 暴露的轻量无状态检测端点，供 Docker、K8s 或负载均衡器探测服务就绪（Readiness）与存活（Liveness）状态。
+_Avoid_: Ping, Heartbeat Endpoint, Status Page
