@@ -112,4 +112,12 @@ _Avoid_: Manual Changelog (纯手写日志), Random Commit Log
 由 GitHub Actions CI/CD 流水线在发版时自动编译、测试并推送至 GHCR 的开箱即用多架构 OCI 镜像制品，终端用户无需克隆本地源码及安装编译工具链即可单文件直接拉起。
 _Avoid_: Source Build (本地源码构建), Dynamic Image
 
+**Container Tag Hierarchy (容器镜像标签分层体系)**:
+指 GHCR 多架构镜像在语义化发布时，自动维护的 `{{major}}` (如 `1`)、`{{major}}.{{minor}}` (如 `1.2`)、`{{version}}` (如 `1.2.4`) 与 `latest` 四级递进浮动指针架构，支持用户按需锁定不同粒度的兼容性与补丁级别。
+_Avoid_: Flat Tagging (扁平无分级标签), Static Tag (固定单标签)
+
+**Registry Hygiene (制品纯净性治理)**:
+在容器镜像构建中显式禁用 SLSA Provenance 与 SBOM Attestation 附属层（`provenance: false` 与 `sbom: false`），消除 GHCR 列表中的 `unknown/unknown` 幽灵架构层并保障边缘节点与各类 Docker 引擎极致兼容性的工程策略。
+_Avoid_: Phantom Arch (幽灵架构), Attestation Pollution (凭证层污染)
+
 
