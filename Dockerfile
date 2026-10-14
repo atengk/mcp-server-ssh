@@ -2,7 +2,7 @@
 # Stage 1: 构建阶段 (Builder)
 # 使用 --platform=$BUILDPLATFORM 确保构建在原生架构上高速执行
 # ==========================================
-FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS builder
 
 WORKDIR /build
 
@@ -20,7 +20,7 @@ RUN pnpm run build
 # ==========================================
 # Stage 2: 极简生产运行镜像 (Runner)
 # ==========================================
-FROM node:20-alpine AS runner
+FROM node:26-alpine AS runner
 
 WORKDIR /app
 
