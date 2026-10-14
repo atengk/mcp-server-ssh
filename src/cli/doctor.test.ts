@@ -24,6 +24,25 @@ describe("CLI 全景自检排障套件 (runDoctor)", () => {
     const auditCheck = result.checks.find((c) => c.name === "安全审计轨迹 (ADR-0014)");
     expect(auditCheck?.status).toBe("PASS");
     expect(auditCheck?.message).toContain("未启用状态");
+
+    const identityCheck = result.checks.find((c) => c.name === "服务身份标识 (ADR-0015)");
+    expect(identityCheck?.status).toBe("PASS");
+    expect(identityCheck?.message).toContain('"mcp-server-ssh"');
+    expect(identityCheck?.message).toContain("未配置额外引导指示");
+  });
+
+  it("当配置了自定义服务身份与引导指示时，诊断应展示对应名称与指示字符长度", async () => {
+    const result = await runDoctor({
+      env: {
+        MCP_SSH_SERVER_NAME: "prod-cluster-gateway",
+        MCP_SSH_SERVER_INSTRUCTIONS: "专用于生产集群巡检与运维操作",
+      },
+    });
+
+    const identityCheck = result.checks.find((c) => c.name === "服务身份标识 (ADR-0015)");
+    expect(identityCheck?.status).toBe("PASS");
+    expect(identityCheck?.message).toContain('"prod-cluster-gateway"');
+    expect(identityCheck?.message).toContain("已注入自定义引导指示");
   });
 
   it("当配置了审计日志路径且目录可写时，审计探针应报告 PASS", async () => {

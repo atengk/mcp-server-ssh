@@ -101,7 +101,12 @@ export interface MCPServerOptions {
   jobService?: JobService;
   auditService?: AuditService;
   allowDangerousCommands?: boolean;
+  /** 自定义服务唯一名称标识 (ADR-0015，用于多实例区分及工具描述修饰) */
+  serverName?: string;
+  /** 注入大模型的系统级服务引导提示指示说明 (ADR-0015，握手即读) */
+  serverInstructions?: string;
 }
+
 
 
 
@@ -158,26 +163,34 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       execService,
     });
 
-  const server = new McpServer({
+  const envConfig = parseEnv();
+  const serverName = options?.serverName ?? envConfig.serverName;
+  const serverInstructions = options?.serverInstructions ?? envConfig.serverInstructions;
 
-    name: "mcp-server-ssh",
-    version: "1.2.0",
-  });
+  const server = new McpServer(
+    {
+      name: serverName,
+      version: "1.2.0",
+    },
+    serverInstructions ? { instructions: serverInstructions } : undefined
+  );
 
-  // 透明装配全生命周期安全审计切面 (ADR-0014)
+  const shouldDecorate = Boolean(serverName && serverName !== "mcp-server-ssh");
+  const decorateDesc = (desc: unknown): unknown =>
+    typeof desc === "string" && shouldDecorate ? `[${serverName}] ${desc}` : desc;
+
+  // 透明装配全生命周期安全审计切面 (ADR-0014) 与工具描述修饰 (ADR-0015)
   const originalRegisterTool = server.tool.bind(server);
   (server as any).tool = (name: string, ...args: any[]) => {
     if (args.length === 2 && typeof args[1] === "function") {
       const [desc, handler] = args;
-      return (originalRegisterTool as any)(name, desc, async () => {
+      return (originalRegisterTool as any)(name, decorateDesc(desc), async () => {
         return auditService.recordToolCall(name, {}, async () => handler());
       });
     }
     if (args.length >= 2 && typeof args[args.length - 1] === "function") {
-      const desc = args[0];
-      const schema = args[1];
-      const handler = args[args.length - 1];
-      return (originalRegisterTool as any)(name, desc, schema, async (params: any) => {
+      const [desc, schema, handler] = [args[0], args[1], args[args.length - 1]];
+      return (originalRegisterTool as any)(name, decorateDesc(desc), schema, async (params: any) => {
         return auditService.recordToolCall(name, params as Record<string, unknown>, async () => {
           return handler(params);
         });
@@ -185,6 +198,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     }
     return (originalRegisterTool as any)(name, ...args);
   };
+
 
 
   // 1. 注册基础心跳与连通性检测工具
@@ -1150,13 +1164,18 @@ async function autoConnectDefaultHost(pool: ConnectionPool, config: ReturnType<t
  *
  * @param customPool 可选注入的底层连接池实例
  * @param customConfig 可选注入的应用全局配置
+ * @param customCliOptions 可选注入的 CLI 命令行解析选项 (ADR-0015)
  * @return 优雅停机控制器函数
  */
 export async function startServer(
   customPool?: ConnectionPool,
-  customConfig?: ReturnType<typeof parseEnv>
+  customConfig?: ReturnType<typeof parseEnv>,
+  customCliOptions?: ReturnType<typeof parseCLIArgs>
 ): Promise<() => Promise<void>> {
   const config = customConfig ?? parseEnv();
+  const serverName = customCliOptions?.serverName ?? config.serverName;
+  const serverInstructions = customCliOptions?.serverInstructions ?? config.serverInstructions;
+
   const configParser = new SSHConfigParser();
   const pool = customPool ?? new ConnectionPool({ configParser });
   const tunnelService = new TunnelService({ connectionPool: pool });
@@ -1167,6 +1186,8 @@ export async function startServer(
     tunnelService,
     auditService,
     allowDangerousCommands: config.allowDangerousCommands,
+    serverName,
+    serverInstructions,
   });
 
   // 1. 依据环境变量自动预建立默认主机连接
@@ -1188,8 +1209,6 @@ export async function startServer(
     await server.close();
   };
 
-
-
   const onSignal = async () => {
     await shutdown();
     process.exit(0);
@@ -1204,12 +1223,19 @@ export async function startServer(
       `[mcp-server-ssh] 服务正在通过 SSE HTTP 模式启动 (${config.serverHost}:${config.serverPort})...\n`
     );
     sseInstance = await startSSEServer({
-      serverFactory: () => createMCPServer({ connectionPool: pool, configParser, auditService }),
+      serverFactory: () =>
+        createMCPServer({
+          connectionPool: pool,
+          configParser,
+          auditService,
+          serverName,
+          serverInstructions,
+        }),
       host: config.serverHost,
-
       port: config.serverPort,
       serviceVersion: "1.1.0",
     });
+
     process.stderr.write(
       `[mcp-server-ssh] SSE HTTP 服务已就绪: http://${config.serverHost}:${sseInstance.port}/sse\n`
     );
@@ -1250,8 +1276,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   // 正常启动 MCP 服务端 (stdio 或 sse)
-  await startServer();
+  await startServer(undefined, undefined, cliArgs);
 }
+
 
 // 非测试环境下自动启动服务
 if (!process.env.VITEST && process.env.NODE_ENV !== "test") {

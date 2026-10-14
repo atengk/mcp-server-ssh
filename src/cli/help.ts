@@ -24,6 +24,8 @@ mcp-server-ssh v${SERVICE_VERSION}
   -h, --help      显示帮助文档并立即退出
   -v, --version   显示当前版本号并立即退出
   --doctor        运行四维全景自检排障套件 (环境、凭据、网络与目标连通性)
+  --server-name <name>          自定义服务唯一名称标识 (默认: "mcp-server-ssh")
+  --server-instructions <text>  注入系统级服务引导提示指示上下文 (大模型初始化即读)
 
 传输承载模式 (Transport Modes):
   stdio (默认)    通过进程标准输入输出管道交换 JSON-RPC 消息 (适用于 Claude Desktop, Cursor 等本地宿主)
@@ -39,6 +41,8 @@ mcp-server-ssh v${SERVICE_VERSION}
   MCP_SSH_PRIVATE_KEY_BASE64    预建连 Base64 编码私钥字符串
   MCP_SSH_KEY_PASSPHRASE        预建连私钥解密密码口令
   MCP_SSH_CONFIG_ALIAS          预建连匹配的 ~/.ssh/config 别名
+  MCP_SSH_SERVER_NAME           自定义服务唯一标识名 (默认: "mcp-server-ssh")
+  MCP_SSH_SERVER_INSTRUCTIONS   大模型系统级引导提示指示说明上下文
   MCP_SSH_TRANSPORT             传输承载模式: "stdio" | "sse" (默认: "stdio")
   MCP_SSH_SERVER_HOST           SSE 模式下的监听地址 (默认: "0.0.0.0")
   MCP_SSH_SERVER_PORT           SSE 模式下的监听端口 (默认: 8000)
@@ -50,6 +54,7 @@ mcp-server-ssh v${SERVICE_VERSION}
   MCP_SSH_AUDIT_MAX_SIZE_MB     单日志文件轮转大小上限 MB (默认: 10)
   MCP_SSH_AUDIT_MAX_FILES       保留的历史切分备份文件数量 (默认: 5)
   MCP_SSH_AUDIT_STRICT          是否启用严格审计熔断 ("true" | "false"，默认: false 柔性降级)
+
 
 
 内置 MCP 工具能力矩阵 (共 29 项原子工具):

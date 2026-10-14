@@ -191,3 +191,18 @@ _Avoid_: Log Entry (普通日志条目), Log Line, Message Packet
 **Credential Sanitizer (凭据脱敏引擎)**:
 在审计事件持久化前深度遍历参数树并利用模式匹配强力遮蔽密码、私钥、Token 与内联命令凭据的安全防护管道。
 _Avoid_: Filter (模糊过滤器), Masker, Stripper
+
+### 服务标识与多实例编排 (Server Identity & Multi-Instance)
+
+**Server Identity (服务身份标识)**:
+在同一 AI 客户端挂载多个 MCP SSH 服务实例时，通过命令行标志（`--server-name`）或规范环境变量（`MCP_SSH_SERVER_NAME`）显式赋予单个服务进程的唯一命名空间与辨识名。
+_Avoid_: Instance ID, Process Name, Tag
+
+**Server Instructions (服务引导指示)**:
+在 MCP 握手协商阶段直接注入至协议根级 `instructions` 字段、用于指导大模型精准领会当前服务角色定位与操作边界的自然语言上下文。
+_Avoid_: System Prompt (模型底层系统提示词), Guide Text, README
+
+**Tool Description Decoration (工具描述修饰)**:
+当配置自定义服务身份标识时，在所有对外暴露的工具描述前透明追加 `[<serverName>] ` 紧凑前缀的轻量渲染机制，防止多服务并存时大模型混淆工具归属。
+_Avoid_: Tool Renaming (重命名工具名), Tool Alias
+

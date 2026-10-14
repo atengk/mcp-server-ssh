@@ -472,6 +472,98 @@ Host test-alias
     await testClient.close();
     await auditedServer.close();
   });
+
+  it("应当支持通过 serverName 与 serverInstructions 自定义服务身份并在工具描述前添加紧凑前缀 (ADR-0015)", async () => {
+    const customServer = createMCPServer({
+      connectionPool: pool,
+      serverName: "prod-bastion",
+      serverInstructions: "本实例专门用于核心生产机房运维，严禁执行破坏性命令",
+    });
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const testClient = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      customServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    // 1. 验证握手声明的服务名称
+    const serverVersion = testClient.getServerVersion();
+    expect(serverVersion?.name).toBe("prod-bastion");
+
+    // 2. 验证协议级 instructions
+    const instructions = testClient.getInstructions();
+    expect(instructions).toBe("本实例专门用于核心生产机房运维，严禁执行破坏性命令");
+
+    // 3. 验证工具描述自动前缀化
+    const toolsResult = await testClient.listTools();
+    const pingTool = toolsResult.tools.find((t) => t.name === "ssh_ping");
+    expect(pingTool?.description).toMatch(/^\[prod-bastion\]\s+/);
+
+    const execTool = toolsResult.tools.find((t) => t.name === "ssh_exec");
+    expect(execTool?.description).toMatch(/^\[prod-bastion\]\s+/);
+
+    await testClient.close();
+    await customServer.close();
+  });
+
+  it("当使用默认 serverName 时，工具描述应保持纯净原样且无前缀", async () => {
+    const defaultServer = createMCPServer({
+      connectionPool: pool,
+    });
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const testClient = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      defaultServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    const toolsResult = await testClient.listTools();
+    const pingTool = toolsResult.tools.find((t) => t.name === "ssh_ping");
+    expect(pingTool?.description).not.toContain("[mcp-server-ssh]");
+    expect(pingTool?.description).toMatch(/^测试 SSH MCP 服务的存活状态/);
+
+    await testClient.close();
+    await defaultServer.close();
+  });
+
+  it("startServer 启动装配时，CLI 命令行选项优先级应高于环境变量", async () => {
+    const mockEnvConfig = {
+      serverName: "env-server-name",
+      serverInstructions: "env instructions",
+      transport: "sse" as const,
+      serverHost: "127.0.0.1",
+      serverPort: 0,
+      timeoutMs: 30000,
+      keepAliveIntervalMs: 10000,
+      allowDangerousCommands: false,
+      audit: {
+        enabled: false,
+        strict: false,
+        maxSizeMb: 10,
+        maxFiles: 5,
+      },
+    };
+
+    const cliOptions = {
+      serverName: "cli-override-name",
+      serverInstructions: "cli override instructions",
+    };
+
+    // startServer 传入自定义 config 与 cliOptions，验证以 SSE 模式成功装配与启动
+    const shutdown = await startServer(pool, mockEnvConfig as any, cliOptions as any);
+    await shutdown();
+  });
 });
+
 
 

@@ -339,5 +339,24 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       ).toThrow(/必须为合法的布尔值/);
     });
   });
+
+  describe("服务标识与多实例指示体系 (ADR-0015)", () => {
+    it("缺省环境下 serverName 默认为 mcp-server-ssh，instructions 默认为 undefined", () => {
+      const config = parseEnv({});
+      expect(config.serverName).toBe("mcp-server-ssh");
+      expect(config.serverInstructions).toBeUndefined();
+    });
+
+    it("正确从规范环境变量解析 MCP_SSH_SERVER_NAME 与 MCP_SSH_SERVER_INSTRUCTIONS", () => {
+      const config = parseEnv({
+        MCP_SSH_SERVER_NAME: "prod-bastion-ssh",
+        MCP_SSH_SERVER_INSTRUCTIONS: "本实例专门用于生产跳板机，严禁执行重启操作",
+      });
+
+      expect(config.serverName).toBe("prod-bastion-ssh");
+      expect(config.serverInstructions).toBe("本实例专门用于生产跳板机，严禁执行重启操作");
+    });
+  });
 });
+
 

@@ -225,6 +225,16 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         message: "安全审计处于未启用状态 (MCP_SSH_AUDIT_ENABLED=false)",
       });
     }
+
+    // 3.3 多实例服务身份与引导指示 (ADR-0015)
+    checks.push({
+      category: "环境变量配置",
+      name: "服务身份标识 (ADR-0015)",
+      status: "PASS",
+      message: `服务标识名称: "${parsedConfig.serverName}"${
+        parsedConfig.serverInstructions ? ` (已注入自定义引导指示: ${parsedConfig.serverInstructions.length} 字符)` : " (未配置额外引导指示)"
+      }`,
+    });
   } catch (err) {
     checks.push({
       category: "环境变量配置",

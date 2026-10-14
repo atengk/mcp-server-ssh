@@ -84,7 +84,16 @@ export interface AppConfig {
   target?: TargetHostConfig;
   proxyJump?: ProxyJumpConfig;
   audit: AuditConfig;
+  /**
+   * 服务唯一名称标识 (默认: "mcp-server-ssh")
+   */
+  serverName: string;
+  /**
+   * 服务引导指示自然语言说明 (缺省时为空)
+   */
+  serverInstructions?: string;
 }
+
 
 
 /**
@@ -339,6 +348,10 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     strict: auditStrict,
   };
 
+  // 6. 服务标识与多实例指示 (ADR-0015)
+  const serverName = getEnvValue(env, "MCP_SSH_SERVER_NAME") || "mcp-server-ssh";
+  const serverInstructions = getEnvValue(env, "MCP_SSH_SERVER_INSTRUCTIONS");
+
   return {
     transport,
     serverHost,
@@ -349,8 +362,11 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     target,
     proxyJump,
     audit,
+    serverName,
+    serverInstructions,
   };
 }
+
 
 
 /**

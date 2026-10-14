@@ -17,6 +17,8 @@ describe("CLI 帮助文档 (getHelpText)", () => {
     expect(text).toContain("-h, --help");
     expect(text).toContain("-v, --version");
     expect(text).toContain("--doctor");
+    expect(text).toContain("--server-name");
+    expect(text).toContain("--server-instructions");
   });
 
   it("帮助手册应完整罗列规范环境变量与能力矩阵", () => {
@@ -26,6 +28,8 @@ describe("CLI 帮助文档 (getHelpText)", () => {
     expect(text).toContain("MCP_SSH_PORT");
     expect(text).toContain("MCP_SSH_USER");
     expect(text).toContain("MCP_SSH_PRIVATE_KEY_PATH");
+    expect(text).toContain("MCP_SSH_SERVER_NAME");
+    expect(text).toContain("MCP_SSH_SERVER_INSTRUCTIONS");
     expect(text).toContain("MCP_SSH_ALLOW_DANGEROUS_COMMANDS");
     expect(text).toContain("MCP_SSH_AUDIT_LOG_PATH");
     expect(text).toContain("共 29 项原子工具");

@@ -36,4 +36,18 @@ describe("CLI 参数解析 (parseCLIArgs)", () => {
     expect(opts.version).toBe(false);
     expect(opts.doctor).toBe(false);
   });
+
+  it("应正确解析 --server-name 与 --server-instructions 字符串选项", () => {
+    const opts1 = parseCLIArgs(["--server-name", "prod-bastion"]);
+    expect(opts1.serverName).toBe("prod-bastion");
+    expect(opts1.serverInstructions).toBeUndefined();
+
+    const opts2 = parseCLIArgs([
+      "--server-name=gpu-cluster",
+      "--server-instructions=用于连接算力节点，请勿执行关机命令",
+    ]);
+    expect(opts2.serverName).toBe("gpu-cluster");
+    expect(opts2.serverInstructions).toBe("用于连接算力节点，请勿执行关机命令");
+  });
 });
+
