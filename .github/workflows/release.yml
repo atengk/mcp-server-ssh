@@ -230,10 +230,16 @@ jobs:
         if: vars.ENABLE_NPM_PUBLISH == 'true' || env.NODE_AUTH_TOKEN != ''
         run: |
           npm version ${{ needs.build-artifacts.outputs.raw_version }} --no-git-tag-version --allow-same-version
-          if [ "${{ needs.build-artifacts.outputs.is_prerelease }}" = "true" ]; then
-            pnpm publish --no-git-checks --tag next --access public
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VER="${{ needs.build-artifacts.outputs.raw_version }}"
+          if npm view "${PKG_NAME}@${PKG_VER}" version >/dev/null 2>&1; then
+            echo "⚡ 版本 ${PKG_NAME}@${PKG_VER} 已存在于 npm 官方注册表，跳过重复发布以保持幂等。"
           else
-            pnpm publish --no-git-checks --access public
+            if [ "${{ needs.build-artifacts.outputs.is_prerelease }}" = "true" ]; then
+              pnpm publish --no-git-checks --tag next --access public
+            else
+              pnpm publish --no-git-checks --access public
+            fi
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
