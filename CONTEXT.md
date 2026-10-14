@@ -224,3 +224,12 @@ _Avoid_: Force Skip, Bypass Rule
 在 GitHub Actions 任务终结时直接利用 `$GITHUB_STEP_SUMMARY` 输出富文本表格、测试通过率及制品拉取指令清单的结构化开发者体验报告。
 _Avoid_: Raw Console Output, Log Scraping
 
+**Git Hook Guard (Git 钩子守门器)**:
+基于 `.githooks/commit-msg` 在本地代码提交（`git commit`）阶段对 Conventional Commits 格式实施实时拦截与语法校验的原生守门机制。
+_Avoid_: Husky, Commit Linter
+
+**Setup Wizard (环境初始化向导)**:
+基于 `scripts/setup.sh` 自动探查 Node.js 运行时、绑定本地 Git Hooks 路径并提示依赖就绪状态的开箱即用初始化工具。
+_Avoid_: Init Script, Configurator
+
+

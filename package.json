@@ -24,6 +24,9 @@
   },
   "main": "./dist/index.js",
   "scripts": {
+    "setup": "node scripts/run.js setup.sh",
+    "commit": "node scripts/run.js commit.sh",
+    "release": "node scripts/run.js release.sh",
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",

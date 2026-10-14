@@ -702,7 +702,20 @@ flowchart TD
 
 ## 🤝 参与贡献 (Contributing)
 
-欢迎任何形式的贡献、优化建议与缺陷反馈！在提交 Pull Request 前请阅读我们的 [贡献指南 (CONTRIBUTING.md)](./CONTRIBUTING.md)。
+欢迎任何形式的贡献、优化建议与缺陷反馈！本项目遵循现代化 GitHub Flow 与 Conventional Commits 规范，提供了开箱即用的本地工程化工具链：
+
+```bash
+# 1. 一键初始化本地环境并激活 Git 提交守门钩子
+npm run setup
+
+# 2. 启动 TypeScript 热重载监听与运行全量单测
+npm run dev && npm test
+
+# 3. 启动交互式向导规范化组装 Conventional Commit 提交
+npm run commit
+```
+
+详细的分支策略、二元流水线机制、发版向导与开发规范请参阅完整的 **[贡献指南 (CONTRIBUTING.md)](./CONTRIBUTING.md)**。
 
 ---
 
