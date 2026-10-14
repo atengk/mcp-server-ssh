@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { getPreConnectParams, maskSensitiveConfig, parseEnv } from "./env.js";
 
-describe("环境变量集中解析体系 (parseEnv)", () => {
+describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
   it("默认环境下应返回标准的缺省配置", () => {
     const config = parseEnv({});
 
@@ -22,60 +22,78 @@ describe("环境变量集中解析体系 (parseEnv)", () => {
     expect(config.proxyJump).toBeUndefined();
   });
 
-  it("官方标准前缀 MCP_SSH_* 应优先于遗留前缀 SSH_*", () => {
-    const env = {
-      MCP_SSH_HOST: "canonical-host.example.com",
-      SSH_HOST: "legacy-host.example.com",
-      MCP_SSH_PORT: "2222",
-      SSH_PORT: "22",
-      MCP_SSH_USER: "canonical-user",
-      SSH_USER: "legacy-user",
-      MCP_SSH_TRANSPORT: "sse",
-      SSH_TRANSPORT: "stdio",
-      MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "true",
-      SSH_ALLOW_DANGEROUS_COMMANDS: "false",
-    };
-
-    const config = parseEnv(env);
-
-    expect(config.transport).toBe("sse");
-    expect(config.allowDangerousCommands).toBe(true);
-    expect(config.target?.host).toBe("canonical-host.example.com");
-    expect(config.target?.port).toBe(2222);
-    expect(config.target?.username).toBe("canonical-user");
-  });
-
-  it("当未指定标准前缀时应平滑回退支持遗留前缀 SSH_*", () => {
-    const env = {
+  it("非 MCP_SSH_* 前缀的遗留变量应被完全静默忽略 (零别名降级)", () => {
+    const legacyEnv = {
       SSH_HOST: "legacy-host.example.com",
       SSH_PORT: "2200",
       SSH_USER: "legacy-user",
       SSH_PASSWORD: "legacy-password",
       SSH_TIMEOUT: "45000",
-      SSH_ALLOW_DANGEROUS_COMMANDS: "1",
+      SSH_ALLOW_DANGEROUS_COMMANDS: "true",
+      PORT: "9000",
+      HOST: "127.0.0.1",
+      SSH_TRANSPORT: "sse",
+      MCP_TRANSPORT: "sse",
     };
 
-    const config = parseEnv(env);
+    const config = parseEnv(legacyEnv);
 
-    expect(config.target?.host).toBe("legacy-host.example.com");
-    expect(config.target?.port).toBe(2200);
-    expect(config.target?.username).toBe("legacy-user");
-    expect(config.target?.password).toBe("legacy-password");
-    expect(config.timeoutMs).toBe(45000);
-    expect(config.allowDangerousCommands).toBe(true);
+    // 均保持默认值，遗留变量未被读取
+    expect(config.transport).toBe("stdio");
+    expect(config.serverHost).toBe("0.0.0.0");
+    expect(config.serverPort).toBe(8000);
+    expect(config.timeoutMs).toBe(30000);
+    expect(config.allowDangerousCommands).toBe(false);
+    expect(config.target).toBeUndefined();
   });
 
-  it("应支持宽容布尔值转换 (大小写不敏感、数字与常见真值)", () => {
+  it("官方标准前缀 MCP_SSH_* 才能正确被解析生效", () => {
+    const canonicalEnv = {
+      MCP_SSH_HOST: "canonical-host.example.com",
+      MCP_SSH_PORT: "2222",
+      MCP_SSH_USER: "canonical-user",
+      MCP_SSH_PASSWORD: "canonical-password",
+      MCP_SSH_TRANSPORT: "sse",
+      MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "true",
+      MCP_SSH_TIMEOUT: "45000",
+      MCP_SSH_KEEP_ALIVE_INTERVAL: "15000",
+    };
+
+    const config = parseEnv(canonicalEnv);
+
+    expect(config.transport).toBe("sse");
+    expect(config.allowDangerousCommands).toBe(true);
+    expect(config.timeoutMs).toBe(45000);
+    expect(config.keepAliveIntervalMs).toBe(15000);
+    expect(config.target?.host).toBe("canonical-host.example.com");
+    expect(config.target?.port).toBe(2222);
+    expect(config.target?.username).toBe("canonical-user");
+    expect(config.target?.password).toBe("canonical-password");
+  });
+
+  it("严格布尔类型校验：仅允许大小写不敏感的 true 与 false", () => {
     expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "true" }).allowDangerousCommands).toBe(true);
     expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "TRUE" }).allowDangerousCommands).toBe(true);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "1" }).allowDangerousCommands).toBe(true);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "yes" }).allowDangerousCommands).toBe(true);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "on" }).allowDangerousCommands).toBe(true);
-
+    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: " True " }).allowDangerousCommands).toBe(true);
     expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "false" }).allowDangerousCommands).toBe(false);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "0" }).allowDangerousCommands).toBe(false);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "no" }).allowDangerousCommands).toBe(false);
-    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "" }).allowDangerousCommands).toBe(false);
+    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "FALSE" }).allowDangerousCommands).toBe(false);
+    expect(parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: " False " }).allowDangerousCommands).toBe(false);
+  });
+
+  it("传入模糊或非标布尔值时应立即抛出明确异常熔断启动", () => {
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "1" })).toThrow(/必须为合法的布尔值/);
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "0" })).toThrow(/必须为合法的布尔值/);
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "yes" })).toThrow(/必须为合法的布尔值/);
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "no" })).toThrow(/必须为合法的布尔值/);
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "on" })).toThrow(/必须为合法的布尔值/);
+    expect(() => parseEnv({ MCP_SSH_ALLOW_DANGEROUS_COMMANDS: "invalid_val" })).toThrow(/必须为合法的布尔值/);
+  });
+
+  it("传输模式 MCP_SSH_TRANSPORT 必须严格为 stdio 或 sse", () => {
+    expect(parseEnv({ MCP_SSH_TRANSPORT: "sse" }).transport).toBe("sse");
+    expect(parseEnv({ MCP_SSH_TRANSPORT: "stdio" }).transport).toBe("stdio");
+    expect(() => parseEnv({ MCP_SSH_TRANSPORT: "http" })).toThrow(/必须为 "stdio" 或 "sse"/);
+    expect(() => parseEnv({ MCP_SSH_TRANSPORT: "websocket" })).toThrow(/必须为 "stdio" 或 "sse"/);
   });
 
   it("非法的端口号或数字应抛出语义明确的异常", () => {
@@ -84,15 +102,21 @@ describe("环境变量集中解析体系 (parseEnv)", () => {
     expect(() => parseEnv({ MCP_SSH_PORT: "70000" })).toThrow(/端口号超出有效范围/);
     expect(() => parseEnv({ MCP_SSH_SERVER_PORT: "not-a-number" })).toThrow(/无效的端口号/);
     expect(() => parseEnv({ MCP_SSH_TIMEOUT: "-100" })).toThrow(/超时时间必须为正整数/);
+    expect(() => parseEnv({ MCP_SSH_KEEP_ALIVE_INTERVAL: "0" })).toThrow(/超时时间必须为正整数/);
   });
 
-  describe("私钥多形态凭证解析", () => {
-    it("应正确保留物理文件路径", () => {
-      const config = parseEnv({
+  describe("私钥凭据唯一对齐解析 (MCP_SSH_PRIVATE_KEY_PATH)", () => {
+    it("应正确读取 MCP_SSH_PRIVATE_KEY_PATH 物理文件路径且忽略非标 KEY_PATH", () => {
+      const config1 = parseEnv({
+        MCP_SSH_PRIVATE_KEY_PATH: "/home/user/.ssh/id_ed25519",
+      });
+      expect(config1.target?.privateKey).toBe("/home/user/.ssh/id_ed25519");
+
+      // 遗留的 MCP_SSH_KEY_PATH 应被忽略
+      const config2 = parseEnv({
         MCP_SSH_KEY_PATH: "/home/user/.ssh/id_ed25519",
       });
-
-      expect(config.target?.privateKey).toBe("/home/user/.ssh/id_ed25519");
+      expect(config2.target).toBeUndefined();
     });
 
     it("应将字面量换行符 \\n 还原为真正的多行 PEM 私钥文本", () => {
@@ -125,7 +149,7 @@ describe("环境变量集中解析体系 (parseEnv)", () => {
       const config = parseEnv({
         MCP_SSH_PRIVATE_KEY_BASE64: base64Pem,
         MCP_SSH_PRIVATE_KEY: "-----BEGIN FROM RAW-----",
-        MCP_SSH_KEY_PATH: "/some/path",
+        MCP_SSH_PRIVATE_KEY_PATH: "/some/path",
       });
 
       expect(config.target?.privateKey).toBe(rawPem);
@@ -133,14 +157,14 @@ describe("环境变量集中解析体系 (parseEnv)", () => {
   });
 
   describe("跳板机 (ProxyJump) 预配置解析", () => {
-    it("应支持从环境变量完整解析跳板机拓扑", () => {
+    it("应支持从规范环境变量完整解析跳板机拓扑", () => {
       const env = {
         MCP_SSH_HOST: "10.0.0.5",
         MCP_SSH_PROXY_HOST: "bastion.example.com",
         MCP_SSH_PROXY_PORT: "2222",
         MCP_SSH_PROXY_USER: "jumpadmin",
         MCP_SSH_PROXY_PASSWORD: "jump-secret-password",
-        MCP_SSH_PROXY_KEY_PATH: "/root/.ssh/bastion_key",
+        MCP_SSH_PROXY_PRIVATE_KEY_PATH: "/root/.ssh/bastion_key",
       };
 
       const config = parseEnv(env);
@@ -216,7 +240,6 @@ describe("环境变量集中解析体系 (parseEnv)", () => {
       expect(params?.setAsDefault).toBe(true);
       expect(params?.readyTimeout).toBe(30000);
       expect(params?.keepaliveInterval).toBe(10000);
-      // 检查跳板机组装 (无密码私钥时为标准字符串)
       expect(params?.proxyJump).toBe("jumpuser@bastion.example.com:2222");
     });
 

@@ -23,6 +23,7 @@ export interface ExecServiceOptions {
   connectionPool: ConnectionPool;
   safetyGuard?: SafetyGuard;
   outputTruncator?: OutputTruncator;
+  allowDangerousCommands?: boolean;
 }
 
 /**
@@ -32,11 +33,13 @@ export class ExecService {
   private connectionPool: ConnectionPool;
   private safetyGuard: SafetyGuard;
   private outputTruncator: OutputTruncator;
+  private allowDangerousCommands: boolean;
 
   public constructor(options: ExecServiceOptions) {
     this.connectionPool = options.connectionPool;
     this.safetyGuard = options.safetyGuard ?? new SafetyGuard();
     this.outputTruncator = options.outputTruncator ?? new OutputTruncator();
+    this.allowDangerousCommands = options.allowDangerousCommands ?? false;
   }
 
   /**
@@ -50,12 +53,9 @@ export class ExecService {
     const params: SSHExecParams = SSHExecParamsSchema.parse(rawParams);
     const startTime = Date.now();
 
-    // 1. 前置安全守卫校验（支持环境变量 + 入参双重授权逃生门）
+    // 1. 前置安全守卫校验（支持环境变量集中配置 + 入参显式双重授权逃生门）
     if (params.dangerouslySkipSafetyCheck) {
-      const allowDangerous =
-        process.env.MCP_SSH_ALLOW_DANGEROUS_COMMANDS === "true" ||
-        process.env.SSH_ALLOW_DANGEROUS_COMMANDS === "true";
-      if (!allowDangerous) {
+      if (!this.allowDangerousCommands) {
         throw new Error(
           "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
         );

@@ -1,6 +1,8 @@
 /**
  * 环境变量解析器与集中配置管理中枢 (12-Factor App)
  *
+ * 实施严格单命名空间治理与非宽松类型校验 (ADR-0012)
+ *
  * @author Ateng
  * @since 2026-10-04
  */
@@ -53,56 +55,47 @@ export interface AppConfig {
 }
 
 /**
- * 从环境变量映射中按优先级提取值
+ * 从环境变量映射中提取严格规范的值
  *
- * 优先读取 MCP_SSH_* 规范前缀，缺失时依次降级尝试备选键名
+ * 仅且严格读取 MCP_SSH_* 规范键名，不存在或为空白字符串时返回 undefined
  *
  * @param env 环境变量键值对
  * @param canonicalKey 官方标准主键名 (如 MCP_SSH_HOST)
- * @param fallbackKeys 备选向下兼容键名列表 (如 SSH_HOST)
  * @return 命中的非空字符串，未命中时返回 undefined
  */
-function getEnvValue(
-  env: NodeJS.ProcessEnv,
-  canonicalKey: string,
-  fallbackKeys: string[] = []
-): string | undefined {
+function getEnvValue(env: NodeJS.ProcessEnv, canonicalKey: string): string | undefined {
   const canonical = env[canonicalKey];
   if (canonical !== undefined && canonical.trim() !== "") {
     return canonical.trim();
   }
-
-  for (const fallback of fallbackKeys) {
-    const val = env[fallback];
-    if (val !== undefined && val.trim() !== "") {
-      return val.trim();
-    }
-  }
-
   return undefined;
 }
 
 /**
- * 宽容布尔值转换器
+ * 严格布尔值转换器 (Strict Configuration Guard)
  *
- * 支持 1, true, yes, on, t (大小写不敏感) 为 true，其余均为 false
+ * 仅且严格允许 "true" 或 "false"（忽略大小写与首尾空格），严禁 "1"、"yes"、"on" 等模糊宽松推断
  *
  * @param value 环境变量原始值
  * @param defaultValue 缺省默认值
+ * @param fieldName 字段名称 (用于友好错误提示)
  * @return 解析后的布尔值
+ * @throws 当输入非空且非严格 "true" / "false" 时抛出配置解析异常
  */
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+function parseBoolean(value: string | undefined, defaultValue: boolean, fieldName: string): boolean {
   if (value === undefined) {
     return defaultValue;
   }
   const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on", "t"].includes(normalized)) {
+  if (normalized === "true") {
     return true;
   }
-  if (["0", "false", "no", "off", "f", ""].includes(normalized)) {
+  if (normalized === "false") {
     return false;
   }
-  return defaultValue;
+  throw new Error(
+    `[mcp-server-ssh] 配置解析错误: ${fieldName} 必须为合法的布尔值 ("true" 或 "false")，收到无效输入 "${value}"`
+  );
 }
 
 /**
@@ -154,7 +147,7 @@ function parsePositiveInt(value: string | undefined, defaultValue: number, field
 }
 
 /**
- * 提取并规范化私钥凭证输入 (支持 Base64、PEM 文本字面量换行与文件路径)
+ * 提取并规范化私钥凭证输入 (仅支持 MCP_SSH_PRIVATE_KEY_BASE64, MCP_SSH_PRIVATE_KEY, MCP_SSH_PRIVATE_KEY_PATH)
  *
  * @param env 环境变量字典
  * @param isProxy 是否提取跳板机私钥
@@ -162,10 +155,9 @@ function parsePositiveInt(value: string | undefined, defaultValue: number, field
  */
 function resolvePrivateKey(env: NodeJS.ProcessEnv, isProxy = false): string | undefined {
   const prefix = isProxy ? "MCP_SSH_PROXY_" : "MCP_SSH_";
-  const legacyPrefix = isProxy ? "SSH_PROXY_" : "SSH_";
 
   // 1. 优先级最高：Base64 编码的私钥字符串
-  const base64Key = getEnvValue(env, `${prefix}PRIVATE_KEY_BASE64`, [`${legacyPrefix}PRIVATE_KEY_BASE64`]);
+  const base64Key = getEnvValue(env, `${prefix}PRIVATE_KEY_BASE64`);
   if (base64Key) {
     try {
       return Buffer.from(base64Key, "base64").toString("utf-8");
@@ -179,16 +171,13 @@ function resolvePrivateKey(env: NodeJS.ProcessEnv, isProxy = false): string | un
   }
 
   // 2. 优先级次高：PEM 私钥多行文本 (还原可能被环境转义的 \\n)
-  const rawKey = getEnvValue(env, `${prefix}PRIVATE_KEY`, [`${legacyPrefix}PRIVATE_KEY`]);
+  const rawKey = getEnvValue(env, `${prefix}PRIVATE_KEY`);
   if (rawKey) {
     return rawKey.replace(/\\n/g, "\n");
   }
 
-  // 3. 优先级第三：私钥本地文件路径
-  return getEnvValue(env, `${prefix}KEY_PATH`, [
-    `${legacyPrefix}KEY_PATH`,
-    `${legacyPrefix}PRIVATE_KEY_PATH`,
-  ]);
+  // 3. 优先级第三：私钥本地文件路径 (排他性规范锁定为 PRIVATE_KEY_PATH)
+  return getEnvValue(env, `${prefix}PRIVATE_KEY_PATH`);
 }
 
 /**
@@ -199,40 +188,50 @@ function resolvePrivateKey(env: NodeJS.ProcessEnv, isProxy = false): string | un
  */
 export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // 1. 通信协议与服务监听
-  const transportRaw = getEnvValue(env, "MCP_SSH_TRANSPORT", ["SSH_TRANSPORT", "MCP_TRANSPORT"])?.toLowerCase();
-  const transport: TransportMode = transportRaw === "sse" ? "sse" : "stdio";
+  const transportRaw = getEnvValue(env, "MCP_SSH_TRANSPORT")?.toLowerCase();
+  let transport: TransportMode = "stdio";
+  if (transportRaw !== undefined) {
+    if (transportRaw === "sse" || transportRaw === "stdio") {
+      transport = transportRaw;
+    } else {
+      throw new Error(
+        `[mcp-server-ssh] 配置解析错误: MCP_SSH_TRANSPORT 必须为 "stdio" 或 "sse"，收到无效输入 "${transportRaw}"`
+      );
+    }
+  }
 
-  const serverHost = getEnvValue(env, "MCP_SSH_SERVER_HOST", ["SSH_SERVER_HOST", "HOST"]) || "0.0.0.0";
+  const serverHost = getEnvValue(env, "MCP_SSH_SERVER_HOST") || "0.0.0.0";
   const serverPort = parsePort(
-    getEnvValue(env, "MCP_SSH_SERVER_PORT", ["SSH_SERVER_PORT", "PORT"]),
+    getEnvValue(env, "MCP_SSH_SERVER_PORT"),
     8000,
     "MCP_SSH_SERVER_PORT"
   );
 
   // 2. 高级超时与安全选项
   const timeoutMs = parsePositiveInt(
-    getEnvValue(env, "MCP_SSH_TIMEOUT", ["SSH_TIMEOUT"]),
+    getEnvValue(env, "MCP_SSH_TIMEOUT"),
     30000,
     "MCP_SSH_TIMEOUT"
   );
   const keepAliveIntervalMs = parsePositiveInt(
-    getEnvValue(env, "MCP_SSH_KEEP_ALIVE_INTERVAL", ["SSH_KEEP_ALIVE_INTERVAL"]),
+    getEnvValue(env, "MCP_SSH_KEEP_ALIVE_INTERVAL"),
     10000,
     "MCP_SSH_KEEP_ALIVE_INTERVAL"
   );
   const allowDangerousCommands = parseBoolean(
-    getEnvValue(env, "MCP_SSH_ALLOW_DANGEROUS_COMMANDS", ["SSH_ALLOW_DANGEROUS_COMMANDS"]),
-    false
+    getEnvValue(env, "MCP_SSH_ALLOW_DANGEROUS_COMMANDS"),
+    false,
+    "MCP_SSH_ALLOW_DANGEROUS_COMMANDS"
   );
 
   // 3. 目标主机配置解析
-  const host = getEnvValue(env, "MCP_SSH_HOST", ["SSH_HOST"]);
-  const sshConfigAlias = getEnvValue(env, "MCP_SSH_CONFIG_ALIAS", ["SSH_CONFIG_ALIAS"]);
-  const username = getEnvValue(env, "MCP_SSH_USER", ["SSH_USER", "SSH_USERNAME"]);
-  const password = getEnvValue(env, "MCP_SSH_PASSWORD", ["SSH_PASSWORD"]);
+  const host = getEnvValue(env, "MCP_SSH_HOST");
+  const sshConfigAlias = getEnvValue(env, "MCP_SSH_CONFIG_ALIAS");
+  const username = getEnvValue(env, "MCP_SSH_USER");
+  const password = getEnvValue(env, "MCP_SSH_PASSWORD");
   const privateKey = resolvePrivateKey(env, false);
-  const passphrase = getEnvValue(env, "MCP_SSH_KEY_PASSPHRASE", ["SSH_KEY_PASSPHRASE"]);
-  const portRaw = getEnvValue(env, "MCP_SSH_PORT", ["SSH_PORT"]);
+  const passphrase = getEnvValue(env, "MCP_SSH_KEY_PASSPHRASE");
+  const portRaw = getEnvValue(env, "MCP_SSH_PORT");
 
   let target: TargetHostConfig | undefined;
   if (host || sshConfigAlias || username || password || privateKey || passphrase || portRaw) {
@@ -248,16 +247,16 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   // 4. 跳板机 (ProxyJump) 配置解析
-  const proxyHost = getEnvValue(env, "MCP_SSH_PROXY_HOST", ["SSH_PROXY_HOST"]);
+  const proxyHost = getEnvValue(env, "MCP_SSH_PROXY_HOST");
   let proxyJump: ProxyJumpConfig | undefined;
   if (proxyHost) {
     proxyJump = {
       host: proxyHost,
-      port: parsePort(getEnvValue(env, "MCP_SSH_PROXY_PORT", ["SSH_PROXY_PORT"]), 22, "MCP_SSH_PROXY_PORT"),
-      username: getEnvValue(env, "MCP_SSH_PROXY_USER", ["SSH_PROXY_USER"]),
-      password: getEnvValue(env, "MCP_SSH_PROXY_PASSWORD", ["SSH_PROXY_PASSWORD"]),
+      port: parsePort(getEnvValue(env, "MCP_SSH_PROXY_PORT"), 22, "MCP_SSH_PROXY_PORT"),
+      username: getEnvValue(env, "MCP_SSH_PROXY_USER"),
+      password: getEnvValue(env, "MCP_SSH_PROXY_PASSWORD"),
       privateKey: resolvePrivateKey(env, true),
-      passphrase: getEnvValue(env, "MCP_SSH_PROXY_KEY_PASSPHRASE", ["SSH_PROXY_KEY_PASSPHRASE"]),
+      passphrase: getEnvValue(env, "MCP_SSH_PROXY_KEY_PASSPHRASE"),
     };
   }
 

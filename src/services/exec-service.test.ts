@@ -125,10 +125,9 @@ describe("ExecService 远程命令执行服务", () => {
     expect(mockClient.lastExecutedCommand).toBe("cd '/var/log' && ls -la");
   });
 
-  it("当传入 dangerouslySkipSafetyCheck 但无环境变量授权时，应当拒绝执行危险命令", async () => {
-    delete process.env.SSH_ALLOW_DANGEROUS_COMMANDS;
+  it("当传入 dangerouslySkipSafetyCheck 但无 allowDangerousCommands 授权时，应当拒绝执行危险命令", async () => {
     const pool = new ConnectionPool();
-    const service = new ExecService({ connectionPool: pool });
+    const service = new ExecService({ connectionPool: pool, allowDangerousCommands: false });
 
     await expect(
       service.execute({
@@ -138,27 +137,22 @@ describe("ExecService 远程命令执行服务", () => {
     ).rejects.toThrow("拒绝执行危险命令");
   });
 
-  it("当同时具备环境变量 SSH_ALLOW_DANGEROUS_COMMANDS 与 dangerouslySkipSafetyCheck 时，应当放行危险命令", async () => {
-    process.env.SSH_ALLOW_DANGEROUS_COMMANDS = "true";
-    try {
-      const mockClient = new MockExecClient();
-      const pool = new ConnectionPool({
-        clientFactory: () => mockClient as any,
-      });
-      await pool.connect({ host: "127.0.0.1", username: "root" });
+  it("当配置了 allowDangerousCommands 与 dangerouslySkipSafetyCheck 时，应当放行危险命令", async () => {
+    const mockClient = new MockExecClient();
+    const pool = new ConnectionPool({
+      clientFactory: () => mockClient as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "root" });
 
-      const service = new ExecService({ connectionPool: pool });
-      const result = await service.execute({
-        command: "reboot",
-        dangerouslySkipSafetyCheck: true,
-        rawExec: true,
-      });
+    const service = new ExecService({ connectionPool: pool, allowDangerousCommands: true });
+    const result = await service.execute({
+      command: "reboot",
+      dangerouslySkipSafetyCheck: true,
+      rawExec: true,
+    });
 
-      expect(result.exitCode).toBe(0);
-      expect(mockClient.lastExecutedCommand).toBe("reboot");
-    } finally {
-      delete process.env.SSH_ALLOW_DANGEROUS_COMMANDS;
-    }
+    expect(result.exitCode).toBe(0);
+    expect(mockClient.lastExecutedCommand).toBe("reboot");
   });
 
   it("当未找到可用连接且存在上次建连失败记录时，错误信息应附带诊断原因", async () => {

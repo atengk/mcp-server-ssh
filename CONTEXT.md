@@ -79,8 +79,12 @@ _Avoid_: Protocol (协议混称), Communication Method (通信方式)
 _Avoid_: HTTP API, Webhook, REST Route
 
 **Canonical Environment Variable (标准规范环境变量)**:
-遵循 12-Factor App 体系、以 `MCP_SSH_*` 为唯一官方命名空间的一等公民环境变量，具备最高解析优先级与强类型校验约束。
-_Avoid_: Raw Env, Config Key, Config Flag
+遵循 12-Factor App 体系、以 `MCP_SSH_*` 为唯一官方命名空间的一等公民环境变量，彻底剔除历史别名与模糊降级，具备排他性解析权与强类型校验约束。
+_Avoid_: Raw Env, Config Key, Config Flag, Legacy Alias (废弃别名)
+
+**Strict Configuration Guard (严格配置守卫)**:
+对输入环境变量实施严格字面量判定与单命名空间收敛的校验中枢，彻底禁止宽松类型推断（如将 `"yes"`/`"1"` 自动转为布尔），对非标输入实施立即熔断，并对非 `MCP_SSH_*` 外部变量执行静默忽略。
+_Avoid_: Loose Converter (宽松转换器), Permissive Parser (宽容解析器), Fuzzy Config (模糊配置)
 
 **Pre-connection (预连接)**:
 在 MCP 服务初始化启动阶段，依据规范环境变量（`MCP_SSH_*`）自动建立并指定为默认活跃通道的 SSH 物理连接机制。

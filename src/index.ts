@@ -92,6 +92,7 @@ export interface MCPServerOptions {
   tunnelService?: TunnelService;
   systemService?: SystemService;
   jobService?: JobService;
+  allowDangerousCommands?: boolean;
 }
 
 
@@ -112,6 +113,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       connectionPool: pool,
       safetyGuard,
       outputTruncator,
+      allowDangerousCommands: options?.allowDangerousCommands,
     });
   const sessionService =
     options?.sessionService ??
@@ -1086,10 +1088,9 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
 }
 
 /**
- * 依据环境变量自动预建立默认主机连接
+ * 依据应用配置自动预建立默认主机连接
  */
-async function autoConnectDefaultHost(pool: ConnectionPool): Promise<void> {
-  const config = parseEnv();
+async function autoConnectDefaultHost(pool: ConnectionPool, config: ReturnType<typeof parseEnv>): Promise<void> {
   const preConnectParams = getPreConnectParams(config);
 
   if (preConnectParams) {
@@ -1121,10 +1122,15 @@ export async function startServer(
   const configParser = new SSHConfigParser();
   const pool = customPool ?? new ConnectionPool({ configParser });
   const tunnelService = new TunnelService({ connectionPool: pool });
-  const server = createMCPServer({ connectionPool: pool, configParser, tunnelService });
+  const server = createMCPServer({
+    connectionPool: pool,
+    configParser,
+    tunnelService,
+    allowDangerousCommands: config.allowDangerousCommands,
+  });
 
   // 1. 依据环境变量自动预建立默认主机连接
-  await autoConnectDefaultHost(pool);
+  await autoConnectDefaultHost(pool, config);
 
   let sseInstance: RunningSSEServer | undefined;
   let isShuttingDown = false;
