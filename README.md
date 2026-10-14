@@ -3,7 +3,7 @@
 [![NPM Version](https://img.shields.io/npm/v/@atengk/mcp-server-ssh.svg?style=flat-square)](https://www.npmjs.com/package/@atengk/mcp-server-ssh)
 [![Release](https://img.shields.io/github/v/release/atengk/mcp-server-ssh?style=flat-square)](https://github.com/atengk/mcp-server-ssh/releases)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/atengk/mcp-server-ssh/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/atengk/mcp-server-ssh/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
@@ -686,6 +686,7 @@ flowchart TD
 - [ADR-0013: CLI 命令选项体系与四维全景自检套件](docs/adr/0013-cli-flags-and-doctor-diagnostics.md)
 - [ADR-0014: 全生命周期安全审计轨迹与零泄密凭据脱敏架构](docs/adr/0014-audit-trail-and-security-compliance.md)
 - [ADR-0015: 多实例服务身份标识与引导指示架构](docs/adr/0015-multi-instance-server-identity-and-instructions.md)
+- [ADR-0016: 全面集成 oss-template 工业级开源工程基建与 Apache-2.0 协议切换架构](docs/adr/0016-oss-template-integration-and-apache-license-migration.md)
 
 ---
 
@@ -707,4 +708,4 @@ flowchart TD
 
 ## 📄 开源许可证 (License)
 
-本项目基于 [MIT License](./LICENSE) 协议完全开源。
+本项目基于 [Apache License 2.0 (Apache-2.0)](./LICENSE) 协议完全开源。

@@ -45,6 +45,7 @@ filter_unconventional = false
 split_commits = false
 
 commit_parsers = [
+  { message = "^.*!:|BREAKING CHANGE", group = "💥 破坏性更新 (Breaking Changes)" },
   { message = "^feat", group = "🚀 新特性 (Features)" },
   { message = "^fix", group = "🐛 缺陷修复 (Bug Fixes)" },
   { message = "^perf", group = "⚡ 性能优化 (Performance)" },
@@ -62,4 +63,4 @@ commit_parsers = [
 # 过滤与标签匹配规则
 protect_breaking_commits = false
 filter_commits = false
-tag_pattern = "v[0-9].*"
+tag_pattern = "v?[0-9].*"

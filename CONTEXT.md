@@ -206,3 +206,21 @@ _Avoid_: System Prompt (模型底层系统提示词), Guide Text, README
 当配置自定义服务身份标识时，在所有对外暴露的工具描述前透明追加 `[<serverName>] ` 紧凑前缀的轻量渲染机制，防止多服务并存时大模型混淆工具归属。
 _Avoid_: Tool Renaming (重命名工具名), Tool Alias
 
+### 开源工程与自动化发版体系 (OSS Engineering & Release Infrastructure)
+
+**Binary CI/CD Workflow (二元 CI/CD 工作流)**:
+遵循关注点分离原则，将日常 PR 质量守门与代码集成（`ci.yml`）与打标生产发行（`release.yml`）严格解耦的双轨流水线架构体系。
+_Avoid_: Monolithic Workflow (单一全量工作流), Combined Action
+
+**Immutable Release Artifact (不可变发布制品)**:
+发版阶段遵循“Build Once, Distribute Everywhere”原则，单次编译生成并附带 SHA-256 校验和防伪清单的不可变归档包（如 npm 压缩包与多架构容器镜像）。
+_Avoid_: Dynamic Build, Mutable Package
+
+**Path Fast-Pass (路径短路直通)**:
+在持续集成（CI）流水线中通过路径变动分析，当变更仅涉及文档、配置或元数据时自动短路跳过费时耗算力的测试矩阵并秒级盖戳放行的安全加速机制。
+_Avoid_: Force Skip, Bypass Rule
+
+**Step Summary Dashboard (看板摘要直出)**:
+在 GitHub Actions 任务终结时直接利用 `$GITHUB_STEP_SUMMARY` 输出富文本表格、测试通过率及制品拉取指令清单的结构化开发者体验报告。
+_Avoid_: Raw Console Output, Log Scraping
+
