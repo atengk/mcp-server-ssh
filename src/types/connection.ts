@@ -67,3 +67,29 @@ export const ConnectionInfoSchema = z.object({
 });
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>;
+
+/**
+ * 本地 ~/.ssh/config 静态配置主机项 Schema
+ */
+export const ConfigHostInfoSchema = z.object({
+  alias: z.string().describe("Host 别名"),
+  hostName: z.string().optional().describe("目标真实主机名或 IP"),
+  user: z.string().optional().describe("配置的登录用户名"),
+  port: z.number().optional().describe("配置的 SSH 端口"),
+  proxyJump: z.string().optional().describe("配置的跳板机别名或连接配置"),
+});
+
+export type ConfigHostInfo = z.infer<typeof ConfigHostInfoSchema>;
+
+/**
+ * 统一目标发现结果 Schema
+ */
+export const SSHListTargetsResultSchema = z.object({
+  activeConnections: z.array(ConnectionInfoSchema).describe("当前已连接并鉴权的活跃 SSH 物理链路列表"),
+  configuredHosts: z.array(ConfigHostInfoSchema).describe("本地 ~/.ssh/config 中解析到的预设主机配置清单"),
+  totalActive: z.number().describe("活跃连接总数"),
+  totalConfigured: z.number().describe("配置主机总数"),
+});
+
+export type SSHListTargetsResult = z.infer<typeof SSHListTargetsResultSchema>;
+

@@ -7,19 +7,25 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
+import tar from "tar-stream";
 import type { SFTPWrapper } from "ssh2";
-import type { ConnectionPool } from "../connection/manager.js";
+import type { ConnectionPool } from "../connection/pool.js";
 import type {
+  SFTPDownloadDirParams,
   SFTPDownloadParams,
   SFTPItem,
   SFTPListDirParams,
   SFTPMkdirParams,
+  SFTPPatchFileParams,
   SFTPReadFileParams,
   SFTPRemoveParams,
   SFTPStatParams,
+  SFTPUploadDirParams,
   SFTPUploadParams,
   SFTPWriteFileParams,
 } from "../types/sftp.js";
+
 
 /**
  * SFTP 选项配置
@@ -348,6 +354,275 @@ export class SFTPService {
       localPath: params.localPath,
     };
   }
+
+  /**
+   * 对远程文本文件实施精准锚点差异补丁更新
+   *
+   * @param params 差异补丁入参
+   * @return 补丁执行结果及变更统计
+   * @throws 目标文本未匹配或匹配多处时抛出异常
+   */
+  public async patchFile(
+    params: SFTPPatchFileParams
+  ): Promise<{
+    success: boolean;
+    remotePath: string;
+    matchesReplaced: number;
+    bytesBefore: number;
+    bytesAfter: number;
+  }> {
+    const normalizedPath = path.posix.normalize(params.remotePath);
+
+    // 1. 读取原文件内容
+    const { content: originalContent, bytesRead: bytesBefore } = await this.readFile({
+      remotePath: normalizedPath,
+      connectionId: params.connectionId,
+      encoding: "utf-8",
+      maxBytes: 524288,
+    });
+
+    // 2. 检查待替换文本块
+    if (!originalContent.includes(params.targetContent)) {
+      throw new Error(
+        `补丁失败：待替换的目标文本块未在远程文件 "${normalizedPath}" 中找到。请确保目标文本完全一致（包含换行与缩进空格）。`
+      );
+    }
+
+    const occurrences = originalContent.split(params.targetContent).length - 1;
+    if (occurrences > 1 && !params.allowMultiple) {
+      throw new Error(
+        `补丁失败：目标文本块在远程文件 "${normalizedPath}" 中匹配到了 ${occurrences} 处。为防止误伤，请包含更多上下文行以确保唯一定位，或显式传入 allowMultiple: true。`
+      );
+    }
+
+    // 3. 执行替换（使用函数返回值替换以防止 $ 字符被正则引擎误展开）
+    let newContent: string;
+    if (params.allowMultiple) {
+      newContent = originalContent.replaceAll(params.targetContent, () => params.replacementContent);
+    } else {
+      newContent = originalContent.replace(params.targetContent, () => params.replacementContent);
+    }
+
+    // 4. 回写文件
+    const { bytesWritten: bytesAfter } = await this.writeFile({
+      remotePath: normalizedPath,
+      content: newContent,
+      connectionId: params.connectionId,
+      createDirectories: false,
+    });
+
+    return {
+      success: true,
+      remotePath: normalizedPath,
+      matchesReplaced: params.allowMultiple ? occurrences : 1,
+      bytesBefore,
+      bytesAfter,
+    };
+  }
+
+  /**
+   * 将本地目录树通过纯 JS 流式 Tar 打包流式上传解压至远程主机
+   *
+   * @param params 目录上传入参
+   * @return 上传结果及归档统计
+   * @throws 本地目录不存在或远程解包失败时抛出异常
+   */
+  public async uploadDir(
+    params: SFTPUploadDirParams
+  ): Promise<{
+    success: boolean;
+    localPath: string;
+    remotePath: string;
+    totalFiles: number;
+    totalBytes: number;
+  }> {
+    const conn = this.connectionPool.getConnection(params.connectionId);
+    if (!conn) {
+      throw new Error(`未找到可用的 SSH 连接 (${params.connectionId || "默认连接"})`);
+    }
+
+    if (!fs.existsSync(params.localPath) || !fs.statSync(params.localPath).isDirectory()) {
+      throw new Error(`本地目录不存在或不是有效目录: ${params.localPath}`);
+    }
+
+    const normalizedRemotePath = path.posix.normalize(params.remotePath);
+    const escapedRemote = normalizedRemotePath.replace(/'/g, "'\\''");
+
+    const pack = tar.pack();
+    let totalFiles = 0;
+    let totalBytes = 0;
+
+    const walkDir = (currentDir: string) => {
+      const entries = fs.readdirSync(currentDir);
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry);
+        const stat = fs.statSync(fullPath);
+        const relPath = path.relative(params.localPath, fullPath).replace(/\\/g, "/");
+
+        if (stat.isDirectory()) {
+          pack.entry({ name: relPath, type: "directory", mode: stat.mode });
+          walkDir(fullPath);
+        } else if (stat.isFile()) {
+          totalFiles++;
+          totalBytes += stat.size;
+          const content = fs.readFileSync(fullPath);
+          pack.entry({ name: relPath, size: stat.size, mode: stat.mode, mtime: stat.mtime }, content);
+        }
+      }
+    };
+
+    walkDir(params.localPath);
+    pack.finalize();
+
+    const gzip = zlib.createGzip();
+    const remoteCmd = `mkdir -p '${escapedRemote}' && tar -xzf - -C '${escapedRemote}'`;
+
+    await new Promise<void>((resolve, reject) => {
+      conn.client.exec(remoteCmd, (err, stream) => {
+        if (err) {
+          return reject(new Error(`创建远程解压通道失败: ${err.message}`));
+        }
+
+        let stderrOutput = "";
+        stream.stderr.on("data", (chunk: Buffer) => {
+          stderrOutput += chunk.toString("utf-8");
+        });
+
+        let exitCode: number | undefined;
+        stream.on("exit", (code: number) => {
+          exitCode = code;
+        });
+
+        stream.on("close", (code?: number) => {
+          const finalCode = code ?? exitCode ?? 0;
+          if (finalCode === 0) {
+            resolve();
+          } else {
+            reject(new Error(`远程目录解包失败 (退出码 ${finalCode}): ${stderrOutput}`));
+          }
+        });
+
+        pack.pipe(gzip).pipe(stream);
+      });
+    });
+
+    return {
+      success: true,
+      localPath: params.localPath,
+      remotePath: normalizedRemotePath,
+      totalFiles,
+      totalBytes,
+    };
+  }
+
+  /**
+   * 将远程目录通过流式 Tar 打包并在本地流式解压下载
+   *
+   * @param params 目录下载入参
+   * @return 下载解压统计结果
+   * @throws 远程打包失败或本地写入失败时抛出异常
+   */
+  public async downloadDir(
+    params: SFTPDownloadDirParams
+  ): Promise<{
+    success: boolean;
+    remotePath: string;
+    localPath: string;
+  }> {
+    const conn = this.connectionPool.getConnection(params.connectionId);
+    if (!conn) {
+      throw new Error(`未找到可用的 SSH 连接 (${params.connectionId || "默认连接"})`);
+    }
+
+    const normalizedRemotePath = path.posix.normalize(params.remotePath);
+    const escapedRemote = normalizedRemotePath.replace(/'/g, "'\\''");
+
+    if (!fs.existsSync(params.localPath)) {
+      fs.mkdirSync(params.localPath, { recursive: true });
+    }
+
+    const remoteCmd = `tar -czf - -C '${escapedRemote}' .`;
+
+    await new Promise<void>((resolve, reject) => {
+      conn.client.exec(remoteCmd, (err, stream) => {
+        if (err) {
+          return reject(new Error(`创建远程打包下载通道失败: ${err.message}`));
+        }
+
+        const gunzip = zlib.createGunzip();
+        const extract = tar.extract();
+        let isSettled = false;
+
+        const onError = (error: Error) => {
+          if (!isSettled) {
+            isSettled = true;
+            reject(error);
+          }
+        };
+
+        let stderrOutput = "";
+        stream.stderr.on("data", (chunk: Buffer) => {
+          stderrOutput += chunk.toString("utf-8");
+        });
+
+        let exitCode: number | undefined;
+        stream.on("exit", (code: number) => {
+          exitCode = code;
+        });
+
+        stream.on("close", (code?: number) => {
+          const finalCode = code ?? exitCode ?? 0;
+          if (finalCode !== 0 && !isSettled) {
+            isSettled = true;
+            reject(new Error(`远程目录打包下载失败 (退出码 ${finalCode}): ${stderrOutput}`));
+          }
+        });
+
+        gunzip.on("error", onError);
+        extract.on("error", onError);
+
+        extract.on("entry", (header, entryStream, next) => {
+          const destPath = path.join(params.localPath, header.name);
+          if (header.type === "directory") {
+            try {
+              fs.mkdirSync(destPath, { recursive: true });
+              entryStream.resume();
+              entryStream.on("end", next);
+            } catch (err: any) {
+              next(err);
+            }
+          } else {
+            try {
+              fs.mkdirSync(path.dirname(destPath), { recursive: true });
+              const writeStream = fs.createWriteStream(destPath);
+              entryStream.pipe(writeStream);
+              writeStream.on("finish", next);
+              writeStream.on("error", next);
+            } catch (err: any) {
+              next(err);
+            }
+          }
+        });
+
+        extract.on("finish", () => {
+          if (!isSettled) {
+            isSettled = true;
+            resolve();
+          }
+        });
+
+        const stdoutStream = (stream as any).stdout ?? stream;
+        stdoutStream.pipe(gunzip).pipe(extract);
+      });
+    });
+
+    return {
+      success: true,
+      remotePath: normalizedRemotePath,
+      localPath: params.localPath,
+    };
+  }
+
 
   /**
    * 获取并缓存复用指定连接的 SFTP 会话通道

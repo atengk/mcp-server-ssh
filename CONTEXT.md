@@ -120,4 +120,32 @@ _Avoid_: Flat Tagging (扁平无分级标签), Static Tag (固定单标签)
 在容器镜像构建中显式禁用 SLSA Provenance 与 SBOM Attestation 附属层（`provenance: false` 与 `sbom: false`），消除 GHCR 列表中的 `unknown/unknown` 幽灵架构层并保障边缘节点与各类 Docker 引擎极致兼容性的工程策略。
 _Avoid_: Phantom Arch (幽灵架构), Attestation Pollution (凭证层污染)
 
+### 高级网络与杀手级扩展 (Advanced Networking & Killer Capabilities)
+
+**Target Discovery (统一目标发现)**:
+将已建立活跃连接列表与本机 `~/.ssh/config` 静态预设主机别名聚合输出为统一目标视图的元数据发现机制。
+_Avoid_: Host Scanner (主机扫描器), Endpoint Enum
+
+**Streaming Tar Transfer (流式 Tar 打包传输)**:
+利用纯 JavaScript 内存流结合远程 Linux `tar` 管道实现目录树级双向高速批量归档传输的机制，彻底规避逐文件 SFTP 往返延迟。
+_Avoid_: File-by-file Copy (逐文件拷贝), SCP Recursive
+
+**SSH Tunnel (SSH 端口转发隧道)**:
+基于 SSH 协议直接建立的物理链路多路复用隧道，将宿主机本地端口通过目标主机转发至远程隔离内网端口（Local Forwarding）的机制。
+_Avoid_: VPN (虚拟专用网), Port Mapping (端口映射)
+
+**System Diagnostic Probe (系统巡检探针)**:
+通过无侵入式只读探针一次性采集目标 Linux 主机硬件架构、内核、负载、内存、磁盘与关键监听状态的轻量结构化体检服务。
+_Avoid_: Agent Daemon (专有监控守护进程), Telemetry SDK
+
+**Remote File Patching (远程差异补丁)**:
+基于文本块锚点匹配或统一 Diff 算法对远程大文本文件实施局部原子化更新的机制，避免全量文件反复覆写传输。
+_Avoid_: Full File Overwrite (全量文件覆写), Blind In-place Edit
+
+**Expect Pattern (提示符模式探测)**:
+在交互式 PTY 终端会话流中通过正则模式主动检测 Shell 提示符或预期输出以实现即刻响应的事件驱动等待机制。
+_Avoid_: Fixed Sleep (固定硬等休眠), Busy Wait (忙轮询等待)
+
+
+
 

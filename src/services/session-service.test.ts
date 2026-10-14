@@ -107,4 +107,46 @@ describe("SessionService 交互式 PTY 伪终端会话服务", () => {
     expect(closeResult.closed).toBe(true);
     expect(service.hasSession(sessionId)).toBe(false);
   });
+
+  it("应当支持通过 expectPattern 快速探测提示符并即刻返回", async () => {
+    const pool = new ConnectionPool({
+      clientFactory: () => new MockShellClient() as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "root" });
+
+    const service = new SessionService({ connectionPool: pool });
+    const { sessionId } = await service.startSession({});
+
+    const startTime = Date.now();
+    const result = await service.sendInput({
+      sessionId,
+      input: "ls -la\n",
+      expectPattern: "echo:",
+      timeoutMs: 5000,
+    });
+
+    expect(result.output).toContain("ls -la");
+    expect(Date.now() - startTime).toBeLessThan(500);
+  });
+
+  it("当指定 expectPattern 但在 timeoutMs 内未匹配到时应当抛出超时异常", async () => {
+    const pool = new ConnectionPool({
+      clientFactory: () => new MockShellClient() as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "root" });
+
+    const service = new SessionService({ connectionPool: pool });
+    const { sessionId } = await service.startSession({});
+
+    await expect(
+      service.sendInput({
+        sessionId,
+        input: "echo test\n",
+        expectPattern: "NON_EXISTENT_PROMPT_PATTERN",
+        timeoutMs: 100,
+      })
+    ).rejects.toThrow("等待交互式终端输出匹配模式超时");
+  });
 });
+
+

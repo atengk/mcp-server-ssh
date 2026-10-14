@@ -11,13 +11,21 @@ import dotenv from "dotenv";
 import { z } from "zod";
 import { getPreConnectParams, parseEnv } from "./config/env.js";
 import { SSHConfigParser } from "./connection/config-parser.js";
-import { ConnectionPool } from "./connection/manager.js";
+import { ConnectionPool } from "./connection/pool.js";
 import { SafetyGuard } from "./security/guard.js";
 import { OutputTruncator } from "./security/truncator.js";
 import { ExecService } from "./services/exec-service.js";
 import { SessionService } from "./services/session-service.js";
 import { SFTPService } from "./services/sftp-service.js";
-import { SSHConnectParamsSchema, SSHDisconnectParamsSchema } from "./types/connection.js";
+import { SystemService } from "./services/system-service.js";
+import { TunnelService } from "./services/tunnel-service.js";
+import {
+  ConfigHostInfoSchema,
+  ConnectionInfoSchema,
+  SSHConnectParamsSchema,
+  SSHDisconnectParamsSchema,
+  SSHListTargetsResultSchema,
+} from "./types/connection.js";
 import {
   SSHExecParamsSchema,
   SSHSessionCloseParamsSchema,
@@ -25,15 +33,27 @@ import {
   SSHSessionStartParamsSchema,
 } from "./types/exec.js";
 import {
+  SFTPDownloadDirParamsSchema,
   SFTPDownloadParamsSchema,
   SFTPListDirParamsSchema,
   SFTPMkdirParamsSchema,
+  SFTPPatchFileParamsSchema,
   SFTPReadFileParamsSchema,
   SFTPRemoveParamsSchema,
   SFTPStatParamsSchema,
+  SFTPUploadDirParamsSchema,
   SFTPUploadParamsSchema,
   SFTPWriteFileParamsSchema,
 } from "./types/sftp.js";
+import {
+  SSHSystemInfoParamsSchema,
+  SSHSystemInfoResultSchema,
+} from "./types/system.js";
+import {
+  SSHForwardPortParamsSchema,
+  SSHTunnelCloseParamsSchema,
+  TunnelInfoSchema,
+} from "./types/tunnel.js";
 
 // 1. 初始化环境变量配置
 dotenv.config();
@@ -44,8 +64,10 @@ export { getPreConnectParams, maskSensitiveConfig, parseEnv } from "./config/env
 export type { AppConfig, ProxyJumpConfig, TargetHostConfig, TransportMode } from "./config/env.js";
 export { startSSEServer };
 export type { RunningSSEServer, SSEServerOptions };
-export { ConnectionPool } from "./connection/manager.js";
+export { ConnectionPool } from "./connection/pool.js";
 export { SSHConfigParser } from "./connection/config-parser.js";
+export { SystemService } from "./services/system-service.js";
+export { TunnelService } from "./services/tunnel-service.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -58,7 +80,10 @@ export interface MCPServerOptions {
   execService?: ExecService;
   sessionService?: SessionService;
   sftpService?: SFTPService;
+  tunnelService?: TunnelService;
+  systemService?: SystemService;
 }
+
 
 /**
  * 创建并配置 MCP Server 实例与工具注册
@@ -89,6 +114,17 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     options?.sftpService ??
     new SFTPService({
       connectionPool: pool,
+    });
+  const tunnelService =
+    options?.tunnelService ??
+    new TunnelService({
+      connectionPool: pool,
+    });
+  const systemService =
+    options?.systemService ??
+    new SystemService({
+      connectionPool: pool,
+      execService,
     });
 
   const server = new McpServer({
@@ -187,10 +223,38 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     }
   );
 
-  // 4. 注册列出活跃连接工具
+  // 4. 注册统一目标发现工具 (推荐)
+  server.tool(
+    "ssh_list_targets",
+    "统一目标发现视图：一次性聚合返回当前已连接活跃节点与本地 ~/.ssh/config 预设主机清单",
+    {},
+    async () => {
+      const activeConnections = pool.listConnections();
+      const configuredHosts = configParser.listHosts();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                totalActive: activeConnections.length,
+                totalConfigured: configuredHosts.length,
+                activeConnections,
+                configuredHosts,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  // 5. 注册列出活跃连接工具 (向后兼容，建议优先使用 ssh_list_targets)
   server.tool(
     "ssh_list_connections",
-    "列出当前所有已建立且存活的 SSH 连接与默认路由状态",
+    "[Deprecated] 列出当前所有已建立且存活的 SSH 连接与默认路由状态（建议使用更全面的 ssh_list_targets）",
     {},
     async () => {
       const connections = pool.listConnections();
@@ -214,10 +278,10 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     }
   );
 
-  // 5. 注册列出本机预设主机别名工具
+  // 6. 注册列出本机预设主机别名工具 (向后兼容，建议优先使用 ssh_list_targets)
   server.tool(
     "ssh_list_config_hosts",
-    "读取并列出本地 ~/.ssh/config 中解析到的所有 Host 别名与基本配置",
+    "[Deprecated] 读取并列出本地 ~/.ssh/config 中解析到的所有 Host 别名与基本配置（建议使用更全面的 ssh_list_targets）",
     {},
     async () => {
       const hosts = configParser.listHosts();
@@ -617,6 +681,215 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     }
   );
 
+  // 18. 注册远程文本文件差异补丁工具
+  server.tool(
+    "sftp_patch_file",
+    "对远程大文本文件实施精准锚点文本块原子化替换，杜绝整文件覆写与行号漂移风险",
+    SFTPPatchFileParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.patchFile(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `执行文件差异补丁失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 19. 注册远程目录批量流式上传工具
+  server.tool(
+    "sftp_upload_dir",
+    "基于纯 JS 内存流式 Tar 架构将宿主机本地整个目录树批量打包上传至远程主机并解压",
+    SFTPUploadDirParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.uploadDir(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `流式上传目录失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 20. 注册远程目录批量流式下载工具
+  server.tool(
+    "sftp_download_dir",
+    "基于纯 JS 流式 Tar 架构将远程目录打包并流式下载解压至宿主机本地",
+    SFTPDownloadDirParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await sftpService.downloadDir(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `流式下载目录失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 21. 注册远程系统体检与环境巡检工具
+  server.tool(
+    "ssh_system_info",
+    "一键无损采集远程 Linux 系统的发行版、内核、硬件架构、CPU 负载、内存/磁盘余量与监听端口摘要",
+    SSHSystemInfoParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await systemService.getSystemInfo(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `远程系统巡检失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 22. 注册建立本地端口转发隧道工具
+  server.tool(
+    "ssh_forward_port",
+    "建立本地端口转发隧道（-L），将宿主机本地端口经由 SSH 链路转发至远程内网服务（内置空闲超时释放防泄漏）",
+    SSHForwardPortParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await tunnelService.openTunnel(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "listening",
+                  message: `端口转发隧道已成功启动，正在监听本地 ${result.localHost}:${result.localPort} -> 远程 ${result.remoteHost}:${result.remotePort}`,
+                  tunnel: result,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `建立端口转发隧道失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 23. 注册列出活跃端口转发隧道工具
+  server.tool(
+    "ssh_tunnel_list",
+    "列出当前所有活跃的端口转发隧道状态、端口映射与传输统计",
+    {},
+    async () => {
+      const tunnels = tunnelService.listTunnels();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                total: tunnels.length,
+                tunnels,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  // 24. 注册关闭端口转发隧道工具
+  server.tool(
+    "ssh_tunnel_close",
+    "按标识符主动关闭指定的端口转发隧道并释放宿主机本地监听端口",
+    SSHTunnelCloseParamsSchema.shape,
+    async (params) => {
+      const result = await tunnelService.closeTunnel(params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                status: result.closed ? "closed" : "not_found",
+                tunnelId: result.tunnelId,
+                message: result.closed ? `已成功关闭端口转发隧道 ${result.tunnelId}` : `未找到指定标识符的隧道 ${result.tunnelId}`,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
   return server;
 }
 
@@ -655,7 +928,8 @@ export async function startServer(
   const config = customConfig ?? parseEnv();
   const configParser = new SSHConfigParser();
   const pool = customPool ?? new ConnectionPool({ configParser });
-  const server = createMCPServer({ connectionPool: pool, configParser });
+  const tunnelService = new TunnelService({ connectionPool: pool });
+  const server = createMCPServer({ connectionPool: pool, configParser, tunnelService });
 
   // 1. 依据环境变量自动预建立默认主机连接
   await autoConnectDefaultHost(pool);
@@ -670,9 +944,11 @@ export async function startServer(
     if (sseInstance) {
       await sseInstance.close();
     }
+    await tunnelService.closeAll();
     await pool.closeAll();
     await server.close();
   };
+
 
   const onSignal = async () => {
     await shutdown();

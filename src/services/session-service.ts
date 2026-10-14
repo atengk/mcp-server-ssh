@@ -24,6 +24,7 @@ interface ActivePTYSession {
   stream: ClientChannel;
   buffer: string[];
   createdAt: Date;
+  dataListeners: Set<() => void>;
 }
 
 /**
@@ -89,10 +90,16 @@ export class SessionService {
             stream,
             buffer: [],
             createdAt: new Date(),
+            dataListeners: new Set(),
           };
 
           stream.on("data", (chunk: Buffer) => {
             session.buffer.push(chunk.toString("utf-8"));
+            for (const listener of session.dataListeners) {
+              try {
+                listener();
+              } catch {}
+            }
           });
 
           stream.on("close", () => {
@@ -134,9 +141,39 @@ export class SessionService {
     // 3. 写入输入内容（支持发送控制字符如 '\x03' Ctrl+C）
     session.stream.write(params.input);
 
-    // 4. 等待收集响应
-    const waitTime = params.waitForMs || 1000;
-    await new Promise((resolve) => setTimeout(resolve, waitTime));
+    // 4. 等待收集响应：支持 expectPattern 正则探测模式与经典 waitForMs 超时
+    if (params.expectPattern) {
+      const regex = new RegExp(params.expectPattern);
+      const maxTimeout = params.timeoutMs ?? 30000;
+
+      await new Promise<void>((resolve, reject) => {
+        let timer: NodeJS.Timeout;
+
+        const checkMatch = () => {
+          const currentText = session.buffer.join("");
+          if (regex.test(currentText)) {
+            clearTimeout(timer);
+            session.dataListeners.delete(checkMatch);
+            resolve();
+          }
+        };
+
+        timer = setTimeout(() => {
+          session.dataListeners.delete(checkMatch);
+          reject(
+            new Error(
+              `等待交互式终端输出匹配模式超时（超时限制为 ${maxTimeout}ms，未匹配到模式: "${params.expectPattern}"）。`
+            )
+          );
+        }, maxTimeout);
+
+        session.dataListeners.add(checkMatch);
+        checkMatch();
+      });
+    } else {
+      const waitTime = params.waitForMs || 1000;
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
 
     // 5. 读取并净化输出
     const rawOutput = session.buffer.join("");
@@ -147,6 +184,7 @@ export class SessionService {
       output: processed.text,
     };
   }
+
 
   /**
    * 关闭指定的 PTY 终端会话并回收资源

@@ -120,3 +120,39 @@ export const SFTPItemSchema = z.object({
 });
 
 export type SFTPItem = z.infer<typeof SFTPItemSchema>;
+
+/**
+ * 远程文本文件差异补丁更新入参 Schema
+ */
+export const SFTPPatchFileParamsSchema = z.object({
+  remotePath: posixAbsolutePathSchema.describe("远程文件绝对路径（必须以 '/' 开头）"),
+  targetContent: z.string().min(1, "待替换的原文本块不能为空").describe("待在远程文件中寻找并替换的精确目标文本块"),
+  replacementContent: z.string().describe("替换后的新文本内容"),
+  allowMultiple: z.boolean().default(false).describe("当目标文本块在文件中存在多处匹配时是否全部替换，默认 false（要求唯一匹配以防误伤）"),
+  connectionId: z.string().optional().describe("目标连接标识符，缺省时使用当前默认连接"),
+});
+
+export type SFTPPatchFileParams = z.infer<typeof SFTPPatchFileParamsSchema>;
+
+/**
+ * 远程目录批量流式上传入参 Schema
+ */
+export const SFTPUploadDirParamsSchema = z.object({
+  localPath: z.string().min(1, "本地目录路径不能为空").describe("宿主机本地待上传目录的绝对路径"),
+  remotePath: posixAbsolutePathSchema.describe("远程目标解包目录绝对路径（不存在时会自动创建）"),
+  connectionId: z.string().optional().describe("目标连接标识符，缺省时使用当前默认连接"),
+});
+
+export type SFTPUploadDirParams = z.infer<typeof SFTPUploadDirParamsSchema>;
+
+/**
+ * 远程目录批量流式下载入参 Schema
+ */
+export const SFTPDownloadDirParamsSchema = z.object({
+  remotePath: posixAbsolutePathSchema.describe("远程待打包下载的目录绝对路径"),
+  localPath: z.string().min(1, "本地保存目录不能为空").describe("宿主机本地保存并解压的目标目录绝对路径"),
+  connectionId: z.string().optional().describe("目标连接标识符，缺省时使用当前默认连接"),
+});
+
+export type SFTPDownloadDirParams = z.infer<typeof SFTPDownloadDirParamsSchema>;
+

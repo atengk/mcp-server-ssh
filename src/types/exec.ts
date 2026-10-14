@@ -57,7 +57,17 @@ export type SSHSessionStartParams = z.infer<typeof SSHSessionStartParamsSchema>;
 export const SSHSessionSendParamsSchema = z.object({
   sessionId: z.string().min(1, "会话标识符不能为空").describe("目标持久 PTY 终端会话 ID"),
   input: z.string().describe("待发送的数据内容或控制字符（如 '\\x03' 发送 Ctrl+C）"),
-  waitForMs: z.number().int().positive().default(1000).describe("等待收集终端响应输出的时间（毫秒），默认 1000ms"),
+  waitForMs: z.number().int().positive().default(1000).describe("若未指定 expectPattern，等待收集终端响应输出的时间（毫秒），默认 1000ms"),
+  expectPattern: z
+    .string()
+    .optional()
+    .describe("用于主动检测命令完成或 Shell 提示符的正则表达式模式字符串（如 '[$#>:]\\s*$'），匹配即刻响应返回"),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .default(30000)
+    .describe("当指定 expectPattern 时，最长等待模式匹配超时时间（毫秒），默认 30000ms (30秒)"),
 });
 
 export type SSHSessionSendParams = z.infer<typeof SSHSessionSendParamsSchema>;

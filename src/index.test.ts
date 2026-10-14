@@ -35,10 +35,25 @@ class MockSSHClient extends EventEmitter {
     setTimeout(() => this.emit("ready"), 5);
     return this;
   });
+  public forwardOut = vi.fn((_sIP, _sPort, _rHost, _rPort, cb) => {
+    cb(null, {
+      pipe: vi.fn().mockReturnThis(),
+      on: vi.fn(),
+    });
+  });
   public exec = vi.fn((cmd, _opts, cb) => {
     const stream = new MockChannelStream();
     setTimeout(() => {
-      stream.stdout.emit("data", Buffer.from("Linux 6.8\n"));
+      if (typeof cmd === "string" && cmd.includes("===OS===")) {
+        stream.stdout.emit(
+          "data",
+          Buffer.from(
+            "===OS===\nPRETTY_NAME=\"Ubuntu 22.04 LTS\"\n===UNAME===\n5.15\nx86_64\nmy-host\n===UPTIME===\n100 100\n===CPU===\n4\nIntel CPU\n0.1 0.1 0.1\n===MEM===\nMemTotal: 8000 kB\nMemFree: 4000 kB\n===DF===\n/dev/sda 1000 500 500 50% /\n===PORTS===\n:22\n"
+          )
+        );
+      } else {
+        stream.stdout.emit("data", Buffer.from("Linux 6.8\n"));
+      }
       stream.stderr.emit("data", Buffer.from(""));
       stream.emit("exit", 0);
       stream.emit("close");
@@ -64,7 +79,9 @@ class MockSSHClient extends EventEmitter {
           isSymbolicLink: () => false,
         })
       ),
-      readFile: vi.fn((_path, readCb) => readCb(null, Buffer.from("mock sftp file content"))),
+      readFile: vi.fn((_path, readCb) =>
+        readCb(null, Buffer.from("mock sftp file content with target_string\n"))
+      ),
       writeFile: vi.fn((_path, _content, writeCb) => writeCb(null)),
       readdir: vi.fn((_path, dirCb) =>
         dirCb(null, [
@@ -135,26 +152,34 @@ Host test-alias
     await pool.closeAll();
   });
 
-  it("应当暴露完整的工具矩阵（连接、命令执行、终端会话及基础 ping）", async () => {
+  it("应当暴露完整的工具矩阵（连接、命令执行、终端会话、SFTP文件、隧道与系统探针）", async () => {
     const result = await client.listTools();
     const toolNames = result.tools.map((t) => t.name);
     expect(toolNames).toContain("ssh_ping");
     expect(toolNames).toContain("ssh_connect");
     expect(toolNames).toContain("ssh_disconnect");
+    expect(toolNames).toContain("ssh_list_targets");
     expect(toolNames).toContain("ssh_list_connections");
     expect(toolNames).toContain("ssh_list_config_hosts");
     expect(toolNames).toContain("ssh_exec");
     expect(toolNames).toContain("ssh_session_start");
     expect(toolNames).toContain("ssh_session_send");
     expect(toolNames).toContain("ssh_session_close");
+    expect(toolNames).toContain("ssh_system_info");
+    expect(toolNames).toContain("ssh_forward_port");
+    expect(toolNames).toContain("ssh_tunnel_list");
+    expect(toolNames).toContain("ssh_tunnel_close");
     expect(toolNames).toContain("sftp_read_file");
     expect(toolNames).toContain("sftp_write_file");
+    expect(toolNames).toContain("sftp_patch_file");
     expect(toolNames).toContain("sftp_list_dir");
     expect(toolNames).toContain("sftp_stat");
     expect(toolNames).toContain("sftp_mkdir");
     expect(toolNames).toContain("sftp_remove");
     expect(toolNames).toContain("sftp_upload");
     expect(toolNames).toContain("sftp_download");
+    expect(toolNames).toContain("sftp_upload_dir");
+    expect(toolNames).toContain("sftp_download_dir");
   });
 
   it("应当支持端到端执行 ssh_exec 并返回执行结果", async () => {
@@ -236,7 +261,7 @@ Host test-alias
     });
     expect(readRes.isError).toBeFalsy();
     const readData = JSON.parse((readRes.content[0] as any).text);
-    expect(readData.content).toBe("mock sftp file content");
+    expect(readData.content).toContain("mock sftp file content");
     expect(readData.bytesRead).toBe(42);
 
     // 2. 浏览目录
@@ -248,6 +273,106 @@ Host test-alias
     const listData = JSON.parse((listRes.content[0] as any).text);
     expect(listData.items).toHaveLength(1);
     expect(listData.items[0].name).toBe("test.txt");
+  });
+
+  it("应当支持端到端调用 ssh_list_targets 统一目标发现", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    const res = await client.callTool({
+      name: "ssh_list_targets",
+      arguments: {},
+    });
+
+    expect(res.isError).toBeFalsy();
+    const data = JSON.parse((res.content[0] as any).text);
+    expect(data.totalActive).toBe(1);
+    expect(data.totalConfigured).toBe(1);
+    expect(data.activeConnections[0].host).toBe("10.0.0.1");
+    expect(data.configuredHosts[0].alias).toBe("test-alias");
+  });
+
+  it("应当支持端到端调用 ssh_system_info 采集系统指标摘要", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    const res = await client.callTool({
+      name: "ssh_system_info",
+      arguments: {},
+    });
+
+    expect(res.isError).toBeFalsy();
+    const data = JSON.parse((res.content[0] as any).text);
+    expect(data.os.distribution).toBe("Ubuntu 22.04 LTS");
+    expect(data.os.arch).toBe("x86_64");
+    expect(data.cpu.cores).toBe(4);
+    expect(data.listeningPorts).toContain(22);
+  });
+
+  it("应当支持端到端通过 ssh_forward_port 建立端口转发并管理生命周期", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    // 1. 开启端口转发
+    const openRes = await client.callTool({
+      name: "ssh_forward_port",
+      arguments: {
+        remoteHost: "127.0.0.1",
+        remotePort: 3306,
+        localPort: 0,
+        idleTimeoutSeconds: 60,
+      },
+    });
+
+    expect(openRes.isError).toBeFalsy();
+    const openData = JSON.parse((openRes.content[0] as any).text);
+    expect(openData.status).toBe("listening");
+    const tunnelId = openData.tunnel.tunnelId;
+
+    // 2. 列出隧道
+    const listRes = await client.callTool({
+      name: "ssh_tunnel_list",
+      arguments: {},
+    });
+    expect(listRes.isError).toBeFalsy();
+    const listData = JSON.parse((listRes.content[0] as any).text);
+    expect(listData.total).toBe(1);
+
+    // 3. 关闭隧道
+    const closeRes = await client.callTool({
+      name: "ssh_tunnel_close",
+      arguments: { tunnelId },
+    });
+    expect(closeRes.isError).toBeFalsy();
+    const closeData = JSON.parse((closeRes.content[0] as any).text);
+    expect(closeData.status).toBe("closed");
+  });
+
+  it("应当支持端到端调用 sftp_patch_file 执行精准锚点差异补丁", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    const patchRes = await client.callTool({
+      name: "sftp_patch_file",
+      arguments: {
+        remotePath: "/etc/profile",
+        targetContent: "target_string",
+        replacementContent: "replaced_string",
+      },
+    });
+
+    expect(patchRes.isError).toBeFalsy();
+    const patchData = JSON.parse((patchRes.content[0] as any).text);
+    expect(patchData.success).toBe(true);
+    expect(patchData.matchesReplaced).toBe(1);
   });
 
   it("应当支持通过 startServer 以 SSE 模式启动并完成健康检查与优雅关闭", async () => {
