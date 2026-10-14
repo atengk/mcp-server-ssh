@@ -181,7 +181,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         id: git-cliff
         with:
-          config: ${{ hashFiles('.cliff.toml') != '' && '.cliff.toml' || '' }}
+          config: .cliff.toml
           args: --tag ${{ needs.build-artifacts.outputs.tag_name }} --latest --strip header --github-repo ${{ github.repository }}
         env:
           OUTPUT: CHANGELOG_RELEASE.md
@@ -207,7 +207,6 @@ jobs:
     name: 发布至 npm 官方源
     runs-on: ubuntu-latest
     needs: [build-artifacts]
-    if: vars.ENABLE_NPM_PUBLISH == 'true' || secrets.NPM_TOKEN != ''
     timeout-minutes: 10
     permissions:
       contents: read
@@ -228,6 +227,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: 同步版本号并发布至 npm
+        if: vars.ENABLE_NPM_PUBLISH == 'true' || env.NODE_AUTH_TOKEN != ''
         run: |
           npm version ${{ needs.build-artifacts.outputs.raw_version }} --no-git-tag-version --allow-same-version
           if [ "${{ needs.build-artifacts.outputs.is_prerelease }}" = "true" ]; then
