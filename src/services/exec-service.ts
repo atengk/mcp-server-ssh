@@ -9,7 +9,12 @@ import type { ClientChannel, ExecOptions } from "ssh2";
 import type { ConnectionPool } from "../connection/manager.js";
 import { SafetyGuard } from "../security/guard.js";
 import { OutputTruncator } from "../security/truncator.js";
-import type { SSHExecParams, SSHExecResult } from "../types/exec.js";
+import {
+  SSHExecParamsSchema,
+  type SSHExecInputParams,
+  type SSHExecParams,
+  type SSHExecResult,
+} from "../types/exec.js";
 
 /**
  * 命令执行服务配置选项
@@ -37,11 +42,12 @@ export class ExecService {
   /**
    * 执行无状态远程 Bash 命令
    *
-   * @param params 命令执行入参
+   * @param rawParams 命令执行入参
    * @return 命令执行退出码、耗时与截断净化后的输出结果
    * @throws 触发高危拦截规则、连接缺失或超时中断时抛出异常
    */
-  public async execute(params: SSHExecParams): Promise<SSHExecResult> {
+  public async execute(rawParams: SSHExecInputParams): Promise<SSHExecResult> {
+    const params: SSHExecParams = SSHExecParamsSchema.parse(rawParams);
     const startTime = Date.now();
 
     // 1. 前置安全守卫校验（支持环境变量 + 入参双重授权逃生门）
@@ -80,11 +86,21 @@ export class ExecService {
       );
     }
 
-    // 4. 组装最终执行命令：初始目录 + 登录 Shell 包装
+    // 4. 组装最终执行命令：初始目录 + Sudo 提权包装 + 登录 Shell 包装
     let wrappedCmd = params.command;
     if (params.cwd) {
       const escapedCwd = params.cwd.replace(/'/g, "'\\''");
       wrappedCmd = `cd '${escapedCwd}' && ${wrappedCmd}`;
+    }
+
+    if (params.sudo) {
+      const password = params.sudoPassword || conn.password;
+      if (!password) {
+        throw new Error(
+          "执行 sudo 提权需要密码，但未提供 sudoPassword 且当前连接未记录认证密码"
+        );
+      }
+      wrappedCmd = `sudo -S -p '' ${wrappedCmd}`;
     }
 
     let finalCommand = wrappedCmd;
@@ -108,6 +124,18 @@ export class ExecService {
       conn.client.exec(finalCommand, execOptions, (err, stream: ClientChannel) => {
         if (err) {
           return reject(new Error(`远程命令通道创建失败: ${err.message}`));
+        }
+
+        // 若启用了 sudo 提权，通过 stdin 数据流安全注入密码
+        if (params.sudo) {
+          const password = params.sudoPassword || conn.password || "";
+          if (password) {
+            try {
+              if (typeof stream.write === "function") {
+                stream.write(`${password}\n`);
+              }
+            } catch {}
+          }
         }
 
         const stdoutChunks: Buffer[] = [];

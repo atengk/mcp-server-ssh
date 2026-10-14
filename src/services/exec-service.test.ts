@@ -16,12 +16,18 @@ import { ExecService } from "./exec-service.js";
 class MockChannelStream extends EventEmitter {
   public stdout = new EventEmitter();
   public stderr = new EventEmitter();
+  public writtenData: string[] = [];
+  public write = vi.fn((data: string) => {
+    this.writtenData.push(data);
+    return true;
+  });
   public close = vi.fn();
   public signal = vi.fn();
 }
 
 class MockExecClient extends EventEmitter {
   public lastExecutedCommand = "";
+  public lastStream?: MockChannelStream;
   public connect = vi.fn(() => {
     setTimeout(() => this.emit("ready"), 5);
     return this;
@@ -32,6 +38,7 @@ class MockExecClient extends EventEmitter {
   public exec = vi.fn((cmd, _opts, cb) => {
     this.lastExecutedCommand = cmd;
     const stream = new MockChannelStream();
+    this.lastStream = stream;
     setTimeout(() => {
       stream.stdout.emit("data", Buffer.from("Linux kernel 6.8\n"));
       stream.stderr.emit("data", Buffer.from(""));
@@ -174,5 +181,28 @@ describe("ExecService 远程命令执行服务", () => {
     await expect(
       service.execute({ command: "uptime" })
     ).rejects.toThrow("最近一次尝试建连失败原因: 网络不可达 192.168.1.99:22");
+  });
+
+  it("当指定 sudo: true 时应当通过 sudo -S 包装执行并通过 stdin 流安全注入提权密码", async () => {
+    const mockClient = new MockExecClient();
+    const pool = new ConnectionPool({
+      clientFactory: () => mockClient as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "ubuntu", password: "default-password" });
+
+    const service = new ExecService({ connectionPool: pool });
+    const result = await service.execute({
+      command: "systemctl restart nginx",
+      sudo: true,
+      sudoPassword: "custom-sudo-password",
+      rawExec: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // 验证命令行上绝不出现密码
+    expect(mockClient.lastExecutedCommand).toBe("sudo -S -p '' systemctl restart nginx");
+    expect(mockClient.lastExecutedCommand).not.toContain("custom-sudo-password");
+    // 验证密码通过 channel stdin 流写入
+    expect(mockClient.lastStream?.writtenData).toEqual(["custom-sudo-password\n"]);
   });
 });

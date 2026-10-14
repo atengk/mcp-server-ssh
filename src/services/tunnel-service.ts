@@ -18,8 +18,9 @@ import type {
  */
 interface ActiveTunnelInstance {
   tunnelId: string;
+  type: "local" | "remote" | "socks5";
   connectionId: string;
-  server: net.Server;
+  server?: net.Server;
   localHost: string;
   localPort: number;
   remoteHost: string;
@@ -30,6 +31,7 @@ interface ActiveTunnelInstance {
   createdAt: Date;
   lastActiveAt: Date;
   idleTimer?: NodeJS.Timeout;
+  cleanup?: () => Promise<void> | void;
 }
 
 /**
@@ -57,11 +59,11 @@ export class TunnelService {
   }
 
   /**
-   * 建立新的 SSH 本地端口转发隧道
+   * 建立新的 SSH 网络端口转发隧道（支持 local 正向、remote 反向与 socks5 动态代理）
    *
    * @param params 端口转发入参
    * @return 建立后的隧道元数据信息
-   * @throws 物理连接不可达或本地端口冲突时抛出异常
+   * @throws 物理连接不可达或端口冲突时抛出异常
    */
   public async openTunnel(params: SSHForwardPortParams): Promise<TunnelInfo> {
     const conn = this.connectionPool.getConnection(params.connectionId);
@@ -72,17 +74,18 @@ export class TunnelService {
     }
 
     const tunnelId = `tunnel_${this.idCounter++}_${Date.now()}`;
+    const type = params.type || "local";
     const localHost = params.localHost || "127.0.0.1";
     const remoteHost = params.remoteHost || "127.0.0.1";
-    const remotePort = params.remotePort;
+    const remotePort = params.remotePort || 0;
     const idleTimeoutSeconds = params.idleTimeoutSeconds ?? 300;
 
     const instance: ActiveTunnelInstance = {
       tunnelId,
+      type,
       connectionId: conn.id,
-      server: null as any,
       localHost,
-      localPort: 0,
+      localPort: params.localPort ?? 0,
       remoteHost,
       remotePort,
       idleTimeoutSeconds,
@@ -92,68 +95,234 @@ export class TunnelService {
       lastActiveAt: new Date(),
     };
 
-    const server = net.createServer((socket) => {
-      instance.activeSockets.add(socket);
-      instance.lastActiveAt = new Date();
-      this.resetIdleTimer(instance);
+    if (type === "remote") {
+      // 模式 2：远程反向端口转发 (Remote Port Forwarding, -R)
+      await new Promise<void>((resolve, reject) => {
+        conn.client.forwardIn(remoteHost, remotePort, (err, bindPort) => {
+          if (err) {
+            return reject(new Error(`远程反向端口转发绑定失败 (${remoteHost}:${remotePort}): ${err.message}`));
+          }
+          if (typeof bindPort === "number") {
+            instance.remotePort = bindPort;
+          }
+          resolve();
+        });
+      });
 
-      const srcIP = socket.remoteAddress || "127.0.0.1";
-      const srcPort = socket.remotePort || 0;
+      const onTcpConnection = (info: any, accept: () => any, reject: () => void) => {
+        if (info.destPort === instance.remotePort) {
+          const stream = accept();
+          const localSocket = net.connect(instance.localPort, instance.localHost, () => {
+            localSocket.pipe(stream);
+            stream.pipe(localSocket);
+          });
 
-      // 依托底层 SSH 物理连接发起 forwardOut 通道建立
-      conn.client.forwardOut(srcIP, srcPort, remoteHost, remotePort, (err, stream) => {
-        if (err) {
-          process.stderr.write(
-            `[mcp-server-ssh] 隧道 ${tunnelId} 建立远端通道失败 (${remoteHost}:${remotePort}): ${err.message}\n`
-          );
-          socket.destroy();
-          return;
-        }
-
-        // 双向流管道转发
-        socket.on("data", (chunk) => {
-          instance.bytesTransferred += chunk.length;
-          instance.lastActiveAt = new Date();
+          instance.activeSockets.add(localSocket);
           this.resetIdleTimer(instance);
+
+          localSocket.on("data", (chunk) => {
+            instance.bytesTransferred += chunk.length;
+            instance.lastActiveAt = new Date();
+            this.resetIdleTimer(instance);
+          });
+
+          stream.on("data", (chunk: Buffer) => {
+            instance.bytesTransferred += chunk.length;
+            instance.lastActiveAt = new Date();
+            this.resetIdleTimer(instance);
+          });
+
+          const onDone = () => {
+            instance.activeSockets.delete(localSocket);
+            this.resetIdleTimer(instance);
+          };
+
+          localSocket.on("close", onDone);
+          localSocket.on("error", onDone);
+          stream.on("close", onDone);
+          stream.on("error", onDone);
+        }
+      };
+
+      conn.client.on("tcp connection", onTcpConnection);
+      instance.cleanup = () => {
+        if (typeof conn.client.removeListener === "function") {
+          conn.client.removeListener("tcp connection", onTcpConnection);
+        }
+        if (typeof conn.client.unforwardIn === "function") {
+          conn.client.unforwardIn(remoteHost, instance.remotePort, () => {});
+        }
+      };
+    } else if (type === "socks5") {
+      // 模式 3：本地动态 SOCKS5 代理 (Dynamic SOCKS5 Proxy, -D)
+      const server = net.createServer((socket) => {
+        instance.activeSockets.add(socket);
+        instance.lastActiveAt = new Date();
+        this.resetIdleTimer(instance);
+
+        let stage = 0; // 0: 握手协商, 1: 请求转发, 2: 管道已建立
+
+        socket.on("data", (data: Buffer) => {
+          if (stage === 0) {
+            // SOCKS5 握手包验证: [0x05, NMETHODS, METHODS...]
+            if (data[0] !== 0x05) {
+              socket.destroy();
+              return;
+            }
+            // 回复无需认证: [0x05, 0x00]
+            socket.write(Buffer.from([0x05, 0x00]));
+            stage = 1;
+          } else if (stage === 1) {
+            // SOCKS5 连接请求包: [0x05, CMD, 0x00, ATYP, DST.ADDR, DST.PORT]
+            if (data[0] !== 0x05 || data[1] !== 0x01) {
+              // 仅支持 CMD 0x01 (CONNECT)
+              socket.write(Buffer.from([0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+              socket.destroy();
+              return;
+            }
+
+            const atyp = data[3];
+            let destHost = "";
+            let destPort = 0;
+
+            if (atyp === 0x01) {
+              // IPv4 (4 字节)
+              destHost = `${data[4]}.${data[5]}.${data[6]}.${data[7]}`;
+              destPort = data.readUInt16BE(8);
+            } else if (atyp === 0x03) {
+              // 域名 (1 字节长度 + 字符串)
+              const domainLen = data[4];
+              destHost = data.slice(5, 5 + domainLen).toString("utf-8");
+              destPort = data.readUInt16BE(5 + domainLen);
+            } else if (atyp === 0x04) {
+              // IPv6 (16 字节)
+              destHost = data.slice(4, 20).toString("hex");
+              destPort = data.readUInt16BE(20);
+            } else {
+              socket.write(Buffer.from([0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+              socket.destroy();
+              return;
+            }
+
+            const srcIP = socket.remoteAddress || "127.0.0.1";
+            const srcPort = socket.remotePort || 0;
+
+            conn.client.forwardOut(srcIP, srcPort, destHost, destPort, (err, stream: any) => {
+              if (err) {
+                socket.write(Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+                socket.destroy();
+                return;
+              }
+
+              // 回复成功: [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]
+              socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+              stage = 2;
+
+              socket.on("data", (chunk) => {
+                instance.bytesTransferred += chunk.length;
+                instance.lastActiveAt = new Date();
+                this.resetIdleTimer(instance);
+              });
+
+              stream.on("data", (chunk: Buffer) => {
+                instance.bytesTransferred += chunk.length;
+                instance.lastActiveAt = new Date();
+                this.resetIdleTimer(instance);
+              });
+
+              socket.pipe(stream);
+              stream.pipe(socket);
+
+              const onSocketDone = () => {
+                instance.activeSockets.delete(socket);
+                this.resetIdleTimer(instance);
+              };
+
+              socket.on("close", onSocketDone);
+              socket.on("error", onSocketDone);
+              stream.on("close", onSocketDone);
+              stream.on("error", onSocketDone);
+            });
+          }
+        });
+      });
+
+      instance.server = server;
+
+      await new Promise<void>((resolve, reject) => {
+        server.listen(params.localPort ?? 0, localHost, () => {
+          const address = server.address();
+          if (address && typeof address === "object") {
+            instance.localPort = address.port;
+          }
+          resolve();
+        });
+        server.on("error", (err) => {
+          reject(new Error(`SOCKS5 本地代理监听启动失败 (${localHost}:${params.localPort ?? 0}): ${err.message}`));
+        });
+      });
+    } else {
+      // 模式 1：本地正向端口转发 (Local Port Forwarding, -L)
+      const server = net.createServer((socket) => {
+        instance.activeSockets.add(socket);
+        instance.lastActiveAt = new Date();
+        this.resetIdleTimer(instance);
+
+        const srcIP = socket.remoteAddress || "127.0.0.1";
+        const srcPort = socket.remotePort || 0;
+
+        conn.client.forwardOut(srcIP, srcPort, remoteHost, remotePort, (err, stream: any) => {
+          if (err) {
+            console.error(
+              `[mcp-server-ssh] 隧道 ${tunnelId} 建立远端通道失败 (${remoteHost}:${remotePort}): ${err.message}`
+            );
+            socket.destroy();
+            return;
+          }
+
+          socket.on("data", (chunk) => {
+            instance.bytesTransferred += chunk.length;
+            instance.lastActiveAt = new Date();
+            this.resetIdleTimer(instance);
+          });
+
+          stream.on("data", (chunk: Buffer) => {
+            instance.bytesTransferred += chunk.length;
+            instance.lastActiveAt = new Date();
+            this.resetIdleTimer(instance);
+          });
+
+          socket.pipe(stream);
+          stream.pipe(socket);
+
+          const onSocketDone = () => {
+            instance.activeSockets.delete(socket);
+            this.resetIdleTimer(instance);
+          };
+
+          socket.on("close", onSocketDone);
+          socket.on("error", onSocketDone);
+          stream.on("close", onSocketDone);
+          stream.on("error", onSocketDone);
+        });
+      });
+
+      instance.server = server;
+
+      await new Promise<void>((resolve, reject) => {
+        server.listen(params.localPort ?? 0, localHost, () => {
+          const address = server.address();
+          if (address && typeof address === "object") {
+            instance.localPort = address.port;
+          }
+          resolve();
         });
 
-        stream.on("data", (chunk: Buffer) => {
-          instance.bytesTransferred += chunk.length;
-          instance.lastActiveAt = new Date();
-          this.resetIdleTimer(instance);
+        server.on("error", (err) => {
+          reject(new Error(`本地隧道监听启动失败 (${localHost}:${params.localPort ?? 0}): ${err.message}`));
         });
-
-        socket.pipe(stream);
-        stream.pipe(socket);
-
-        const onSocketDone = () => {
-          instance.activeSockets.delete(socket);
-          this.resetIdleTimer(instance);
-        };
-
-        socket.on("close", onSocketDone);
-        socket.on("error", onSocketDone);
-        stream.on("close", onSocketDone);
-        stream.on("error", onSocketDone);
       });
-    });
-
-    instance.server = server;
-
-    // 启动本地监听
-    await new Promise<void>((resolve, reject) => {
-      server.listen(params.localPort ?? 0, localHost, () => {
-        const address = server.address();
-        if (address && typeof address === "object") {
-          instance.localPort = address.port;
-        }
-        resolve();
-      });
-
-      server.on("error", (err) => {
-        reject(new Error(`本地隧道监听启动失败 (${localHost}:${params.localPort ?? 0}): ${err.message}`));
-      });
-    });
+    }
 
     this.tunnels.set(tunnelId, instance);
     this.resetIdleTimer(instance);
@@ -177,7 +346,12 @@ export class TunnelService {
       clearTimeout(instance.idleTimer);
     }
 
-    // 终止所有当前代理客户端连接
+    if (instance.cleanup) {
+      try {
+        await instance.cleanup();
+      } catch {}
+    }
+
     for (const socket of instance.activeSockets) {
       try {
         socket.destroy();
@@ -185,9 +359,11 @@ export class TunnelService {
     }
     instance.activeSockets.clear();
 
-    await new Promise<void>((resolve) => {
-      instance.server.close(() => resolve());
-    });
+    if (instance.server) {
+      await new Promise<void>((resolve) => {
+        instance.server!.close(() => resolve());
+      });
+    }
 
     this.tunnels.delete(params.tunnelId);
     return { tunnelId: params.tunnelId, closed: true };
@@ -228,8 +404,8 @@ export class TunnelService {
     if (instance.idleTimeoutSeconds > 0) {
       instance.idleTimer = setTimeout(() => {
         if (instance.activeSockets.size === 0) {
-          process.stderr.write(
-            `[mcp-server-ssh] 隧道 ${instance.tunnelId} 已空闲超过 ${instance.idleTimeoutSeconds} 秒，自动熔断释放本地端口 ${instance.localPort}\n`
+          console.error(
+            `[mcp-server-ssh] 隧道 ${instance.tunnelId} 已空闲超过 ${instance.idleTimeoutSeconds} 秒，自动熔断释放本地端口 ${instance.localPort}`
           );
           this.closeTunnel({ tunnelId: instance.tunnelId }).catch(() => {});
         }
@@ -243,8 +419,8 @@ export class TunnelService {
   private handleConnectionDisconnected(connectionId: string): void {
     for (const [id, instance] of this.tunnels.entries()) {
       if (instance.connectionId === connectionId) {
-        process.stderr.write(
-          `[mcp-server-ssh] 检测到物理连接 ${connectionId} 已断开，正在级联释放隧道 ${id}\n`
+        console.error(
+          `[mcp-server-ssh] 检测到物理连接 ${connectionId} 已断开，正在级联释放隧道 ${id}`
         );
         this.closeTunnel({ tunnelId: id }).catch(() => {});
       }
@@ -257,6 +433,7 @@ export class TunnelService {
   private toTunnelInfo(instance: ActiveTunnelInstance): TunnelInfo {
     return {
       tunnelId: instance.tunnelId,
+      type: instance.type,
       localHost: instance.localHost,
       localPort: instance.localPort,
       remoteHost: instance.remoteHost,
@@ -270,3 +447,4 @@ export class TunnelService {
     };
   }
 }
+

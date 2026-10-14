@@ -169,6 +169,11 @@ Host test-alias
     expect(toolNames).toContain("ssh_forward_port");
     expect(toolNames).toContain("ssh_tunnel_list");
     expect(toolNames).toContain("ssh_tunnel_close");
+    expect(toolNames).toContain("ssh_job_start");
+    expect(toolNames).toContain("ssh_job_status");
+    expect(toolNames).toContain("ssh_job_logs");
+    expect(toolNames).toContain("ssh_job_kill");
+    expect(toolNames).toContain("ssh_job_clean");
     expect(toolNames).toContain("sftp_read_file");
     expect(toolNames).toContain("sftp_write_file");
     expect(toolNames).toContain("sftp_patch_file");
@@ -390,6 +395,23 @@ Host test-alias
 
     // 优雅关闭
     await stop();
+  });
+
+  it("应当支持通过 MCP Client 端到端调用 ssh_job_start 启动脱机后台作业", async () => {
+    await client.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    const res = await client.callTool({
+      name: "ssh_job_start",
+      arguments: { command: "sleep 10" },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const data = JSON.parse((res.content[0] as any).text);
+    expect(data.status).toBe("started");
+    expect(data.jobId).toMatch(/^job_/);
   });
 });
 

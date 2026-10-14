@@ -22,6 +22,8 @@ export interface ManagedConnection {
   info: ConnectionInfo;
   /** 可选的跳板机中继 ssh2 实例 */
   jumpClient?: Client;
+  /** 可选的建连密码（用于非交互式 Sudo 提权复用） */
+  password?: string;
 }
 
 /**
@@ -170,6 +172,7 @@ export class ConnectionPool {
         client,
         info,
         jumpClient,
+        password: targetConfig.password,
       };
 
       this.connections.set(connectionId, managed);

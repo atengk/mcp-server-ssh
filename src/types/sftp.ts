@@ -28,6 +28,7 @@ export const SFTPReadFileParamsSchema = z.object({
 });
 
 export type SFTPReadFileParams = z.infer<typeof SFTPReadFileParamsSchema>;
+export type SFTPReadFileInputParams = z.input<typeof SFTPReadFileParamsSchema>;
 
 /**
  * 写入远程文本文件入参 Schema
@@ -140,6 +141,14 @@ export type SFTPPatchFileParams = z.infer<typeof SFTPPatchFileParamsSchema>;
 export const SFTPUploadDirParamsSchema = z.object({
   localPath: z.string().min(1, "本地目录路径不能为空").describe("宿主机本地待上传目录的绝对路径"),
   remotePath: posixAbsolutePathSchema.describe("远程目标解包目录绝对路径（不存在时会自动创建）"),
+  excludePatterns: z
+    .array(z.string())
+    .optional()
+    .describe("通配排除规则列表（例如 ['**/node_modules/**', '**/.git/**']），匹配的文件与目录将被忽略不传输"),
+  useGitignore: z
+    .boolean()
+    .default(true)
+    .describe("是否自动读取待同步目录下的 .gitignore 文件规则并合并至排除清单，默认 true"),
   connectionId: z.string().optional().describe("目标连接标识符，缺省时使用当前默认连接"),
 });
 
@@ -151,6 +160,14 @@ export type SFTPUploadDirParams = z.infer<typeof SFTPUploadDirParamsSchema>;
 export const SFTPDownloadDirParamsSchema = z.object({
   remotePath: posixAbsolutePathSchema.describe("远程待打包下载的目录绝对路径"),
   localPath: z.string().min(1, "本地保存目录不能为空").describe("宿主机本地保存并解压的目标目录绝对路径"),
+  excludePatterns: z
+    .array(z.string())
+    .optional()
+    .describe("通配排除规则列表（例如 ['node_modules', '.git', '*.tmp']），匹配的文件与目录将被忽略不下载"),
+  useGitignore: z
+    .boolean()
+    .default(true)
+    .describe("是否自动探测远程目录下的 .gitignore 规则并转译为 tar 排除参数，默认 true"),
   connectionId: z.string().optional().describe("目标连接标识符，缺省时使用当前默认连接"),
 });
 

@@ -17,6 +17,7 @@ import { OutputTruncator } from "./security/truncator.js";
 import { ExecService } from "./services/exec-service.js";
 import { SessionService } from "./services/session-service.js";
 import { SFTPService } from "./services/sftp-service.js";
+import { JobService } from "./services/job-service.js";
 import { SystemService } from "./services/system-service.js";
 import { TunnelService } from "./services/tunnel-service.js";
 import {
@@ -32,6 +33,13 @@ import {
   SSHSessionSendParamsSchema,
   SSHSessionStartParamsSchema,
 } from "./types/exec.js";
+import {
+  SSHJobCleanParamsSchema,
+  SSHJobKillParamsSchema,
+  SSHJobLogsParamsSchema,
+  SSHJobStartParamsSchema,
+  SSHJobStatusParamsSchema,
+} from "./types/job.js";
 import {
   SFTPDownloadDirParamsSchema,
   SFTPDownloadParamsSchema,
@@ -68,6 +76,7 @@ export { ConnectionPool } from "./connection/pool.js";
 export { SSHConfigParser } from "./connection/config-parser.js";
 export { SystemService } from "./services/system-service.js";
 export { TunnelService } from "./services/tunnel-service.js";
+export { JobService } from "./services/job-service.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -82,6 +91,7 @@ export interface MCPServerOptions {
   sftpService?: SFTPService;
   tunnelService?: TunnelService;
   systemService?: SystemService;
+  jobService?: JobService;
 }
 
 
@@ -126,10 +136,15 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       connectionPool: pool,
       execService,
     });
+  const jobService =
+    options?.jobService ??
+    new JobService({
+      execService,
+    });
 
   const server = new McpServer({
     name: "mcp-server-ssh",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   // 1. 注册基础心跳与连通性检测工具
@@ -887,6 +902,183 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
           },
         ],
       };
+    }
+  );
+
+  // 25. 注册启动脱机后台作业工具
+  server.tool(
+    "ssh_job_start",
+    "在远程主机后台脱机启动长耗时命令（编译/镜像构建/备份等），不受网络断开或 MCP 请求超时影响",
+    SSHJobStartParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await jobService.startJob(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "started",
+                  jobId: result.jobId,
+                  pid: result.pid,
+                  jobDir: result.jobDir,
+                  message: `后台脱机作业已成功启动 (PID ${result.pid})，可通过 ssh_job_status 轮询或 ssh_job_logs 查看输出`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `启动脱机后台作业失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 26. 注册查询脱机后台作业状态工具
+  server.tool(
+    "ssh_job_status",
+    "查询远程脱机后台作业的存活状态、退出码与执行信息",
+    SSHJobStatusParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await jobService.getJobStatus(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `查询作业状态失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 27. 注册分段读取脱机后台作业日志工具
+  server.tool(
+    "ssh_job_logs",
+    "分段或增量获取远程脱机后台作业的标准输出与错误日志",
+    SSHJobLogsParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await jobService.getJobLogs(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `读取作业日志失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 28. 注册终止脱机后台作业工具
+  server.tool(
+    "ssh_job_kill",
+    "向远程脱机后台作业进程发送终止信号（如 SIGTERM 或 SIGKILL）",
+    SSHJobKillParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await jobService.killJob(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: result.killed ? "killed" : "failed",
+                  jobId: result.jobId,
+                  pid: result.pid,
+                  message: result.killed ? `已成功向作业进程 ${result.pid} 下发终止信号` : `向作业进程 ${result.pid} 下发终止信号失败或进程已退出`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `终止后台作业失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 29. 注册清理脱机作业工作空间工具
+  server.tool(
+    "ssh_job_clean",
+    "清理远程主机上已结束或过期的后台作业工作空间目录 (~/.mcp_jobs/)",
+    SSHJobCleanParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await jobService.cleanJobs(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "cleaned",
+                  cleanedCount: result.cleanedCount,
+                  message: `已成功清理 ${result.cleanedCount} 个脱机作业工作空间`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `清理作业空间失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
     }
   );
 

@@ -18,6 +18,8 @@ export const SSHExecParamsSchema = z.object({
   env: z.record(z.string()).optional().describe("注入远程环境的环境变量键值对"),
   dryRun: z.boolean().default(false).describe("是否仅通过安全拦截守卫检测合规性，而不真正下发执行，默认 false"),
   rawExec: z.boolean().default(false).describe("是否绕过登录 Shell 包装（bash -l -c），直接以非登录 Shell 原生执行，默认 false"),
+  sudo: z.boolean().default(false).describe("是否以 sudo 特权身份执行命令（默认 false）。若为 true，自动通过 SSH Channel Stdin 管道流式安全注入提权密码，零命令行明文泄露"),
+  sudoPassword: z.string().optional().describe("sudo 提权专用密码。若未提供，则自动复用当前 SSH 连接的登录密码"),
   dangerouslySkipSafetyCheck: z
     .boolean()
     .default(false)
@@ -25,6 +27,7 @@ export const SSHExecParamsSchema = z.object({
 });
 
 export type SSHExecParams = z.infer<typeof SSHExecParamsSchema>;
+export type SSHExecInputParams = z.input<typeof SSHExecParamsSchema>;
 
 /**
  * 无状态命令执行返回结果 Schema

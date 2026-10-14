@@ -11,4 +11,5 @@ export * from "./sftp.js";
 export * from "./security.js";
 export * from "./tunnel.js";
 export * from "./system.js";
+export * from "./job.js";
 

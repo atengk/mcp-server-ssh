@@ -146,6 +146,18 @@ _Avoid_: Full File Overwrite (全量文件覆写), Blind In-place Edit
 在交互式 PTY 终端会话流中通过正则模式主动检测 Shell 提示符或预期输出以实现即刻响应的事件驱动等待机制。
 _Avoid_: Fixed Sleep (固定硬等休眠), Busy Wait (忙轮询等待)
 
+**Detached Background Job (脱机后台作业)**:
+在远程 Linux 主机通过用户态解耦目录与后台进程守护运行的长耗时命令执行机制，支持客户端异步轮询进程状态、增量获取日志及精确捕获最终退出码。
+_Avoid_: Foreground Process (前台阻塞进程), Daemon Thread (守护线程)
 
+**Exclude Filter (传输排除过滤)**:
+在双向流式目录归档传输过程中，依据 Glob 通配符模式或项目级 `.gitignore` 规则动态拦截并剔除冗余依赖与二进制文件的机制。
+_Avoid_: Blacklist (非标准黑名单), Silent Skip
 
+**Privilege Escalation (非交互特权提权 / Sudo)**:
+在无 TTY 分配的无状态执行环境中，通过专有密码流管道（`sudo -S`）将受管凭据无回显下发至安全进程的特权命令提升机制。
+_Avoid_: Root Login (直接以 Root 建连), Insecure Command Piping (明文命令管道)
 
+**Dynamic SOCKS5 Proxy (动态 SOCKS5 代理)**:
+在本地监听标准 SOCKS5 协议端口，将客户端所有动态 TCP/IP 连接基于 SSH 底层物理连接实施多路复用隧道转发至远程网络边界的动态穿透机制。
+_Avoid_: Fixed Forwarding (固定单端口转发), HTTP Tunnel (纯 HTTP 隧道)

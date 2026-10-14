@@ -5,6 +5,7 @@
  * @since 2026-10-14
  */
 
+import net from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { TunnelService } from "./tunnel-service.js";
 import type { ConnectionPool } from "../connection/pool.js";
@@ -119,6 +120,92 @@ describe("TunnelService 端口转发服务", () => {
     await new Promise((r) => setTimeout(r, 1200));
 
     expect(tunnelService.listTunnels().length).toBe(0);
+  });
+
+  it("应成功开启远程反向端口转发 (type: remote)", async () => {
+    let unforwardCalled = false;
+    const mockClient = {
+      forwardIn: vi.fn((_rHost, _rPort, cb) => {
+        cb(null, 9090); // 远程实际绑定的端口
+      }),
+      unforwardIn: vi.fn((_rHost, _rPort, cb) => {
+        unforwardCalled = true;
+        if (cb) cb(null);
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+
+    const mockPool = {
+      getConnection: vi.fn().mockReturnValue({
+        id: "conn_remote_fwd",
+        client: mockClient,
+      }),
+      onDisconnect: vi.fn(() => () => {}),
+    } as unknown as ConnectionPool;
+
+    const tunnelService = new TunnelService({ connectionPool: mockPool });
+    const info = await tunnelService.openTunnel({
+      type: "remote",
+      remoteHost: "0.0.0.0",
+      remotePort: 9090,
+      localHost: "127.0.0.1",
+      localPort: 3000,
+    });
+
+    expect(info.type).toBe("remote");
+    expect(info.remotePort).toBe(9090);
+    expect(mockClient.forwardIn).toHaveBeenCalled();
+
+    // 关闭反向隧道
+    await tunnelService.closeTunnel({ tunnelId: info.tunnelId });
+    expect(unforwardCalled).toBe(true);
+  });
+
+  it("应成功开启本地动态 SOCKS5 代理 (type: socks5) 并支持握手", async () => {
+    const mockClient = {
+      forwardOut: vi.fn((_sIP, _sPort, _dHost, _dPort, cb) => {
+        cb(null, {
+          pipe: vi.fn().mockReturnThis(),
+          on: vi.fn(),
+        });
+      }),
+    };
+
+    const mockPool = {
+      getConnection: vi.fn().mockReturnValue({
+        id: "conn_socks5",
+        client: mockClient,
+      }),
+      onDisconnect: vi.fn(() => () => {}),
+    } as unknown as ConnectionPool;
+
+    const tunnelService = new TunnelService({ connectionPool: mockPool });
+    const info = await tunnelService.openTunnel({
+      type: "socks5",
+      localPort: 0,
+    });
+
+    expect(info.type).toBe("socks5");
+    expect(info.localPort).toBeGreaterThan(0);
+
+    // 通过 net 客户端连接该 SOCKS5 端口并发送握手包 [0x05, 0x01, 0x00]
+    const client = net.connect(info.localPort, "127.0.0.1");
+    const handshakeResponse = await new Promise<Buffer>((resolve) => {
+      client.on("connect", () => {
+        client.write(Buffer.from([0x05, 0x01, 0x00]));
+      });
+      client.on("data", (chunk) => {
+        resolve(chunk);
+        client.destroy();
+      });
+    });
+
+    // SOCKS5 协议无认证响应: [0x05, 0x00]
+    expect(handshakeResponse[0]).toBe(0x05);
+    expect(handshakeResponse[1]).toBe(0x00);
+
+    await tunnelService.closeTunnel({ tunnelId: info.tunnelId });
   });
 });
 

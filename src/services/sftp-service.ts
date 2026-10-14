@@ -11,19 +11,21 @@ import zlib from "node:zlib";
 import tar from "tar-stream";
 import type { SFTPWrapper } from "ssh2";
 import type { ConnectionPool } from "../connection/pool.js";
-import type {
-  SFTPDownloadDirParams,
-  SFTPDownloadParams,
-  SFTPItem,
-  SFTPListDirParams,
-  SFTPMkdirParams,
-  SFTPPatchFileParams,
-  SFTPReadFileParams,
-  SFTPRemoveParams,
-  SFTPStatParams,
-  SFTPUploadDirParams,
-  SFTPUploadParams,
-  SFTPWriteFileParams,
+import {
+  SFTPReadFileParamsSchema,
+  type SFTPDownloadDirParams,
+  type SFTPDownloadParams,
+  type SFTPItem,
+  type SFTPListDirParams,
+  type SFTPMkdirParams,
+  type SFTPPatchFileParams,
+  type SFTPReadFileInputParams,
+  type SFTPReadFileParams,
+  type SFTPRemoveParams,
+  type SFTPStatParams,
+  type SFTPUploadDirParams,
+  type SFTPUploadParams,
+  type SFTPWriteFileParams,
 } from "../types/sftp.js";
 
 
@@ -76,8 +78,9 @@ export class SFTPService {
    * @throws 当文件大小超过最大字节限制或读取失败时抛出异常
    */
   public async readFile(
-    params: SFTPReadFileParams
+    rawParams: SFTPReadFileInputParams
   ): Promise<{ content: string; bytesRead: number }> {
+    const params: SFTPReadFileParams = SFTPReadFileParamsSchema.parse(rawParams);
     const sftp = await this.getSFTP(params.connectionId);
     const normalizedPath = path.posix.normalize(params.remotePath);
 
@@ -421,6 +424,46 @@ export class SFTPService {
   }
 
   /**
+   * 解析 .gitignore 文件内容为排除规则列表
+   *
+   * @param content .gitignore 文件文本内容
+   * @return 过滤后的有效通配规则数组
+   */
+  private parseGitignoreContent(content: string): string[] {
+    const patterns: string[] = [];
+    const lines = content.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        patterns.push(trimmed);
+      }
+    }
+    return patterns;
+  }
+
+  /**
+   * 将排除模式数组转译为远程 tar 命令的 --exclude 参数字符串
+   *
+   * @param excludePatterns 待转译的通配模式列表
+   * @return 拼接后的 --exclude 参数字符串
+   */
+  private formatExcludeArgs(excludePatterns?: string[]): string {
+    if (!excludePatterns || excludePatterns.length === 0) {
+      return "";
+    }
+    let flags = "";
+    for (const pat of excludePatterns) {
+      const cleaned = pat.trim();
+      if (!cleaned || cleaned.startsWith("#")) {
+        continue;
+      }
+      const escaped = cleaned.replace(/'/g, "'\\''");
+      flags += ` --exclude='${escaped}'`;
+    }
+    return flags;
+  }
+
+  /**
    * 将本地目录树通过纯 JS 流式 Tar 打包流式上传解压至远程主机
    *
    * @param params 目录上传入参
@@ -448,17 +491,85 @@ export class SFTPService {
     const normalizedRemotePath = path.posix.normalize(params.remotePath);
     const escapedRemote = normalizedRemotePath.replace(/'/g, "'\\''");
 
+    // 收集待排除规则清单
+    const excludePatterns: string[] = [...(params.excludePatterns || [])];
+    if (params.useGitignore !== false) {
+      const gitignorePath = path.join(params.localPath, ".gitignore");
+      if (fs.existsSync(gitignorePath)) {
+        try {
+          const content = fs.readFileSync(gitignorePath, "utf-8");
+          excludePatterns.push(...this.parseGitignoreContent(content));
+        } catch {
+          // 本地 .gitignore 读取失败，降级忽略
+        }
+      }
+    }
+
     const pack = tar.pack();
     let totalFiles = 0;
     let totalBytes = 0;
+
+    // 预编译排除规则匹配器，避免在递归遍历中反复实例化正则
+    interface CompiledMatcher {
+      exactName?: string;
+      extension?: string;
+      regex?: RegExp;
+    }
+
+    const compiledMatchers: CompiledMatcher[] = [];
+    for (const rawPattern of excludePatterns) {
+      const pattern = rawPattern.trim();
+      if (!pattern || pattern.startsWith("#")) continue;
+      const cleanPattern = pattern.replace(/^\/+|\/+$/g, "");
+
+      if (cleanPattern.startsWith("*.")) {
+        compiledMatchers.push({ extension: cleanPattern.slice(1) });
+      } else if (!cleanPattern.includes("*") && !cleanPattern.includes("?")) {
+        compiledMatchers.push({ exactName: cleanPattern });
+      } else {
+        const regexPattern = cleanPattern
+          .replace(/\*\*/g, ".*")
+          .replace(/(?<!\.)\*/g, "[^/]*")
+          .replace(/\?/g, ".");
+        try {
+          compiledMatchers.push({
+            regex: new RegExp(`(^|/)${regexPattern}($|/)`),
+          });
+        } catch {
+          // 非法正则忽略
+        }
+      }
+    }
+
+    const isExcluded = (relPath: string) => {
+      const parts = relPath.split("/");
+      const filename = parts[parts.length - 1];
+
+      for (const matcher of compiledMatchers) {
+        if (matcher.exactName && (filename === matcher.exactName || parts.includes(matcher.exactName))) {
+          return true;
+        }
+        if (matcher.extension && filename.endsWith(matcher.extension)) {
+          return true;
+        }
+        if (matcher.regex && matcher.regex.test(relPath)) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     const walkDir = (currentDir: string) => {
       const entries = fs.readdirSync(currentDir);
       for (const entry of entries) {
         const fullPath = path.join(currentDir, entry);
-        const stat = fs.statSync(fullPath);
         const relPath = path.relative(params.localPath, fullPath).replace(/\\/g, "/");
 
+        if (isExcluded(relPath)) {
+          continue;
+        }
+
+        const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
           pack.entry({ name: relPath, type: "directory", mode: stat.mode });
           walkDir(fullPath);
@@ -541,7 +652,23 @@ export class SFTPService {
       fs.mkdirSync(params.localPath, { recursive: true });
     }
 
-    const remoteCmd = `tar -czf - -C '${escapedRemote}' .`;
+    // 收集远程打包排除参数
+    const excludePatterns: string[] = [...(params.excludePatterns || [])];
+    if (params.useGitignore !== false) {
+      try {
+        const gitignoreRemote = path.posix.join(normalizedRemotePath, ".gitignore");
+        const { content } = await this.readFile({
+          remotePath: gitignoreRemote,
+          connectionId: params.connectionId,
+        });
+        excludePatterns.push(...this.parseGitignoreContent(content));
+      } catch {
+        // 远端 .gitignore 读取失败或不存在，降级忽略
+      }
+    }
+
+    const excludeFlags = this.formatExcludeArgs(excludePatterns);
+    const remoteCmd = `tar${excludeFlags} -czf - -C '${escapedRemote}' .`;
 
     await new Promise<void>((resolve, reject) => {
       conn.client.exec(remoteCmd, (err, stream) => {

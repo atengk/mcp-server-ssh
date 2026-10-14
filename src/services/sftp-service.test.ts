@@ -384,6 +384,86 @@ describe("SFTPService POSIX 远程文件系统服务", () => {
       fs.rmSync(localDestDir, { recursive: true, force: true });
     }
   });
+
+  it("uploadDir 应当支持 excludePatterns 过滤规则并忽略匹配的文件与目录", async () => {
+    const mockClient = new MockSFTPClient();
+    const mockStream = new PassThrough() as any;
+    mockStream.stderr = new PassThrough();
+    mockClient.exec = vi.fn((_cmd: string, cb: Function) => {
+      cb(null, mockStream);
+      mockStream.on("finish", () => {
+        mockStream.emit("close", 0);
+      });
+      return mockStream;
+    });
+
+    const pool = new ConnectionPool({
+      clientFactory: () => mockClient as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "root" });
+
+    const tmpDir = path.join(os.tmpdir(), `mcp_upload_filter_${Date.now()}`);
+    fs.mkdirSync(path.join(tmpDir, "node_modules"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "node_modules/pkg.json"), "{}");
+    fs.writeFileSync(path.join(tmpDir, "app.ts"), "console.log('app');");
+    fs.writeFileSync(path.join(tmpDir, "debug.log"), "debug output");
+
+    try {
+      const service = new SFTPService({ connectionPool: pool });
+      const result = await service.uploadDir({
+        localPath: tmpDir,
+        remotePath: "/remote/project",
+        excludePatterns: ["node_modules", "*.log"],
+      });
+
+      expect(result.success).toBe(true);
+      // 只有 app.ts 被包含在上传清单中，node_modules 和 debug.log 被排除
+      expect(result.totalFiles).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("downloadDir 应当将 excludePatterns 转换为 remote tar 的 --exclude 参数", async () => {
+    let executedRemoteCmd = "";
+    const mockClient = new MockSFTPClient();
+    const mockStream = new PassThrough() as any;
+    mockStream.stderr = new PassThrough();
+    mockClient.exec = vi.fn((cmd: string, cb: Function) => {
+      executedRemoteCmd = cmd;
+      cb(null, mockStream);
+      const pack = tar.pack();
+      pack.finalize();
+      const gzip = zlib.createGzip();
+      pack.pipe(gzip).pipe(mockStream);
+      gzip.on("end", () => {
+        mockStream.emit("close", 0);
+      });
+      return mockStream;
+    });
+
+    const pool = new ConnectionPool({
+      clientFactory: () => mockClient as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "root" });
+
+    const localDestDir = path.join(os.tmpdir(), `mcp_download_filter_${Date.now()}`);
+    fs.mkdirSync(localDestDir, { recursive: true });
+
+    try {
+      const service = new SFTPService({ connectionPool: pool });
+      await service.downloadDir({
+        remotePath: "/remote/repo",
+        localPath: localDestDir,
+        excludePatterns: ["node_modules", "*.tmp"],
+      });
+
+      expect(executedRemoteCmd).toContain("--exclude='node_modules'");
+      expect(executedRemoteCmd).toContain("--exclude='*.tmp'");
+    } finally {
+      fs.rmSync(localDestDir, { recursive: true, force: true });
+    }
+  });
 });
 
 

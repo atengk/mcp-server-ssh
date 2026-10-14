@@ -11,8 +11,18 @@ import { z } from "zod";
  * 创建本地端口转发入参 Schema
  */
 export const SSHForwardPortParamsSchema = z.object({
+  type: z
+    .enum(["local", "remote", "socks5"])
+    .default("local")
+    .describe("隧道类型：local (本地正向转发 -L), remote (远程反向转发 -R), socks5 (本地动态代理 -D)，默认 local"),
   remoteHost: z.string().default("127.0.0.1").describe("远程目标主机地址或内网主机名，默认 127.0.0.1"),
-  remotePort: z.number().int().min(1).max(65535).describe("远程目标服务端口号（例如 3306、6379）"),
+  remotePort: z
+    .number()
+    .int()
+    .min(1)
+    .max(65535)
+    .optional()
+    .describe("远程目标服务端口号（local/remote 模式必填，socks5 模式自动动态解析）"),
   localHost: z.string().default("127.0.0.1").describe("宿主机本地绑定的监听地址，默认 127.0.0.1"),
   localPort: z
     .number()
@@ -46,6 +56,7 @@ export type SSHTunnelCloseParams = z.infer<typeof SSHTunnelCloseParamsSchema>;
  */
 export const TunnelInfoSchema = z.object({
   tunnelId: z.string().describe("隧道唯一标识符"),
+  type: z.enum(["local", "remote", "socks5"]).describe("隧道模式类型"),
   localHost: z.string().describe("本地监听地址"),
   localPort: z.number().describe("本地实际监听端口"),
   remoteHost: z.string().describe("远程目标主机"),
