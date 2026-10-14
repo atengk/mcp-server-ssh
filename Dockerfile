@@ -11,7 +11,7 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # 优先复制依赖清单以最大化利用 Docker 缓存层
 COPY package.json pnpm-lock.yaml tsconfig.json tsup.config.ts ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # 复制源代码并执行 tsup 生产打包
 COPY src ./src
