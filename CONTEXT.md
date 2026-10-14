@@ -165,3 +165,11 @@ _Avoid_: Root Login (直接以 Root 建连), Insecure Command Piping (明文命�
 **Dynamic SOCKS5 Proxy (动态 SOCKS5 代理)**:
 在本地监听标准 SOCKS5 协议端口，将客户端所有动态 TCP/IP 连接基于 SSH 底层物理连接实施多路复用隧道转发至远程网络边界的动态穿透机制。
 _Avoid_: Fixed Forwarding (固定单端口转发), HTTP Tunnel (纯 HTTP 隧道)
+
+**CLI Diagnostic Probe (CLI 诊断探针)**:
+在命令行执行阶段用于快速自省 Node.js 运行时、操作系统兼容性、本地 OpenSSH 密钥链与 SSH Agent 存活性的一组无状态轻量探针。
+_Avoid_: Telemetry (遥测), Benchmark (性能基准测试)
+
+**Self-Inspection Doctor (自检诊断器)**:
+由 `--doctor` 标志触发的四维全景自检套件，串联运行环境、本地密钥、环境变量合规性与远程目标连通性测试，并输出结构化 PASS/WARN/FAIL 诊断报告与修复指引。
+_Avoid_: Health Check Endpoint (仅指 HTTP /health 探针), Debug Mode (调试模式)

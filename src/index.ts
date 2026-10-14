@@ -20,6 +20,7 @@ import { SFTPService } from "./services/sftp-service.js";
 import { JobService } from "./services/job-service.js";
 import { SystemService } from "./services/system-service.js";
 import { TunnelService } from "./services/tunnel-service.js";
+import { getHelpText, parseCLIArgs, runDoctor, SERVICE_VERSION } from "./cli/index.js";
 import {
   ConfigHostInfoSchema,
   ConnectionInfoSchema,
@@ -77,6 +78,8 @@ export { SSHConfigParser } from "./connection/config-parser.js";
 export { SystemService } from "./services/system-service.js";
 export { TunnelService } from "./services/tunnel-service.js";
 export { JobService } from "./services/job-service.js";
+export { parseCLIArgs, getHelpText, SERVICE_VERSION, runDoctor } from "./cli/index.js";
+export type { CLIOptions, DoctorCheckItem, DoctorResult, DoctorStatus } from "./cli/index.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -1180,9 +1183,39 @@ export async function startServer(
   return shutdown;
 }
 
+/**
+ * CLI 命令行入口调度器
+ *
+ * 拦截 --help, --version, --doctor 等长短标志并执行对应动作；未传标志时无缝启动 MCP 服务
+ *
+ * @param argv 命令行参数切片，默认使用 process.argv.slice(2)
+ */
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const cliArgs = parseCLIArgs(argv);
+
+  if (cliArgs.help) {
+    process.stdout.write(getHelpText() + "\n");
+    process.exit(0);
+  }
+
+  if (cliArgs.version) {
+    process.stdout.write(`v${SERVICE_VERSION}\n`);
+    process.exit(0);
+  }
+
+  if (cliArgs.doctor) {
+    const result = await runDoctor();
+    process.stdout.write(result.output + "\n");
+    process.exit(result.success ? 0 : 1);
+  }
+
+  // 正常启动 MCP 服务端 (stdio 或 sse)
+  await startServer();
+}
+
 // 非测试环境下自动启动服务
 if (!process.env.VITEST && process.env.NODE_ENV !== "test") {
-  startServer().catch((error) => {
+  main().catch((error) => {
     process.stderr.write(`[mcp-server-ssh] 启动异常退出: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   });
