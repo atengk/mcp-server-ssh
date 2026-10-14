@@ -9,6 +9,7 @@ import type { ClientChannel, ExecOptions } from "ssh2";
 import type { ConnectionPool } from "../connection/manager.js";
 import { SafetyGuard } from "../security/guard.js";
 import { OutputTruncator } from "../security/truncator.js";
+import type { AuditService } from "../audit/index.js";
 import {
   SSHExecParamsSchema,
   type SSHExecInputParams,
@@ -24,6 +25,7 @@ export interface ExecServiceOptions {
   safetyGuard?: SafetyGuard;
   outputTruncator?: OutputTruncator;
   allowDangerousCommands?: boolean;
+  auditService?: AuditService;
 }
 
 /**
@@ -34,13 +36,16 @@ export class ExecService {
   private safetyGuard: SafetyGuard;
   private outputTruncator: OutputTruncator;
   private allowDangerousCommands: boolean;
+  private auditService?: AuditService;
 
   public constructor(options: ExecServiceOptions) {
     this.connectionPool = options.connectionPool;
     this.safetyGuard = options.safetyGuard ?? new SafetyGuard();
     this.outputTruncator = options.outputTruncator ?? new OutputTruncator();
     this.allowDangerousCommands = options.allowDangerousCommands ?? false;
+    this.auditService = options.auditService;
   }
+
 
   /**
    * 执行无状态远程 Bash 命令
@@ -60,8 +65,36 @@ export class ExecService {
           "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
         );
       }
+      // 记录危险命令强制放行内部安全事件
+      void this.auditService?.log({
+        level: "security",
+        category: "safety",
+        action: "dangerous_command_override",
+        connectionId: params.connectionId,
+        params: { command: params.command },
+        result: { status: "success", durationMs: 0 },
+        source: "service_internal",
+      });
     } else {
-      this.safetyGuard.assertSafe(params.command);
+      try {
+        this.safetyGuard.assertSafe(params.command);
+      } catch (err) {
+        // 记录高危命令拦截内部安全事件
+        void this.auditService?.log({
+          level: "security",
+          category: "safety",
+          action: "safety_guard_blocked",
+          connectionId: params.connectionId,
+          params: { command: params.command },
+          result: {
+            status: "blocked",
+            durationMs: 0,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          source: "service_internal",
+        });
+        throw err;
+      }
     }
 
     // 2. 若仅为试运行检测 (dryRun)，放行并直接返回测试标记
@@ -101,7 +134,19 @@ export class ExecService {
         );
       }
       wrappedCmd = `sudo -S -p '' ${wrappedCmd}`;
+
+      // 记录非交互式 Sudo 提权内部安全事件
+      void this.auditService?.log({
+        level: "security",
+        category: "exec",
+        action: "escalate_sudo",
+        connectionId: params.connectionId,
+        params: { command: params.command },
+        result: { status: "success", durationMs: 0 },
+        source: "service_internal",
+      });
     }
+
 
     let finalCommand = wrappedCmd;
     if (!params.rawExec) {

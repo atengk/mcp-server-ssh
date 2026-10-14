@@ -41,6 +41,37 @@ export interface ProxyJumpConfig {
 }
 
 /**
+ * 安全审计配置契约 (ADR-0014)
+ */
+export interface AuditConfig {
+  /**
+   * 是否启用安全审计轨迹记录
+   */
+  enabled: boolean;
+
+  /**
+   * 审计日志文件落盘路径 (未指定时输出至 stderr)
+   */
+  logPath?: string;
+
+  /**
+   * 单文件切分大小上限 (单位: MB)
+   */
+  maxSizeMb: number;
+
+  /**
+   * 保留的历史切分备份文件数
+   */
+  maxFiles: number;
+
+  /**
+   * 是否启用严格熔断模式 (Fail-Closed)
+   */
+  strict: boolean;
+}
+
+
+/**
  * 应用全局集中配置契约
  */
 export interface AppConfig {
@@ -52,7 +83,9 @@ export interface AppConfig {
   allowDangerousCommands: boolean;
   target?: TargetHostConfig;
   proxyJump?: ProxyJumpConfig;
+  audit: AuditConfig;
 }
+
 
 /**
  * 从环境变量映射中提取严格规范的值
@@ -130,21 +163,30 @@ function parsePort(value: string | undefined, defaultPort: number, fieldName: st
  * @param value 原始环境变量字符串
  * @param defaultValue 默认数值
  * @param fieldName 字段名称 (用于友好错误提示)
+ * @param desc 可选的数值业务语义说明
  * @return 解析后的正整数
  * @throws 当数值非法或小于等于 0 时抛出异常
  */
-function parsePositiveInt(value: string | undefined, defaultValue: number, fieldName: string): number {
+function parsePositiveInt(
+
+  value: string | undefined,
+  defaultValue: number,
+  fieldName: string,
+  desc?: string
+): number {
   if (value === undefined) {
     return defaultValue;
   }
 
   const parsed = Number.parseInt(value, 10);
+  const subject = desc ? `${desc}必须为正整数` : "必须为正整数";
   if (Number.isNaN(parsed) || parsed <= 0) {
-    throw new Error(`[mcp-server-ssh] 配置解析错误: ${fieldName} 超时时间必须为正整数毫秒数，收到 "${value}"`);
+    throw new Error(`[mcp-server-ssh] 配置解析错误: ${fieldName} ${subject}，收到 "${value}"`);
   }
 
   return parsed;
 }
+
 
 /**
  * 提取并规范化私钥凭证输入 (仅支持 MCP_SSH_PRIVATE_KEY_BASE64, MCP_SSH_PRIVATE_KEY, MCP_SSH_PRIVATE_KEY_PATH)
@@ -211,13 +253,16 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const timeoutMs = parsePositiveInt(
     getEnvValue(env, "MCP_SSH_TIMEOUT"),
     30000,
-    "MCP_SSH_TIMEOUT"
+    "MCP_SSH_TIMEOUT",
+    "超时时间"
   );
   const keepAliveIntervalMs = parsePositiveInt(
     getEnvValue(env, "MCP_SSH_KEEP_ALIVE_INTERVAL"),
     10000,
-    "MCP_SSH_KEEP_ALIVE_INTERVAL"
+    "MCP_SSH_KEEP_ALIVE_INTERVAL",
+    "超时时间"
   );
+
   const allowDangerousCommands = parseBoolean(
     getEnvValue(env, "MCP_SSH_ALLOW_DANGEROUS_COMMANDS"),
     false,
@@ -260,6 +305,40 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     };
   }
 
+  // 5. 安全审计 (Audit Trail) 配置解析 (ADR-0014)
+  const auditLogPath = getEnvValue(env, "MCP_SSH_AUDIT_LOG_PATH");
+  const auditEnabledRaw = getEnvValue(env, "MCP_SSH_AUDIT_ENABLED");
+  let auditEnabled: boolean;
+  if (auditEnabledRaw !== undefined) {
+    auditEnabled = parseBoolean(auditEnabledRaw, false, "MCP_SSH_AUDIT_ENABLED");
+  } else {
+    auditEnabled = auditLogPath !== undefined;
+  }
+
+  const auditMaxSizeMb = parsePositiveInt(
+    getEnvValue(env, "MCP_SSH_AUDIT_MAX_SIZE_MB"),
+    10,
+    "MCP_SSH_AUDIT_MAX_SIZE_MB"
+  );
+  const auditMaxFiles = parsePositiveInt(
+    getEnvValue(env, "MCP_SSH_AUDIT_MAX_FILES"),
+    5,
+    "MCP_SSH_AUDIT_MAX_FILES"
+  );
+  const auditStrict = parseBoolean(
+    getEnvValue(env, "MCP_SSH_AUDIT_STRICT"),
+    false,
+    "MCP_SSH_AUDIT_STRICT"
+  );
+
+  const audit: AuditConfig = {
+    enabled: auditEnabled,
+    logPath: auditLogPath,
+    maxSizeMb: auditMaxSizeMb,
+    maxFiles: auditMaxFiles,
+    strict: auditStrict,
+  };
+
   return {
     transport,
     serverHost,
@@ -269,8 +348,10 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     allowDangerousCommands,
     target,
     proxyJump,
+    audit,
   };
 }
+
 
 /**
  * 敏感凭证数据安全脱敏 (将明文密码与私钥替换为 *** 掩码)

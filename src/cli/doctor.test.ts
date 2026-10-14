@@ -20,7 +20,24 @@ describe("CLI 全景自检排障套件 (runDoctor)", () => {
     expect(result.output).toContain("[本地 OpenSSH 资产]");
     expect(result.output).toContain("[环境变量配置]");
     expect(result.output).toContain("[目标主机连通性]");
+
+    const auditCheck = result.checks.find((c) => c.name === "安全审计轨迹 (ADR-0014)");
+    expect(auditCheck?.status).toBe("PASS");
+    expect(auditCheck?.message).toContain("未启用状态");
   });
+
+  it("当配置了审计日志路径且目录可写时，审计探针应报告 PASS", async () => {
+    const result = await runDoctor({
+      env: {
+        MCP_SSH_AUDIT_LOG_PATH: "./test-audit.log",
+      },
+    });
+
+    const auditCheck = result.checks.find((c) => c.name === "安全审计轨迹 (ADR-0014)");
+    expect(auditCheck?.status).toBe("PASS");
+    expect(auditCheck?.message).toContain("安全审计已激活");
+  });
+
 
   it("当环境变量存在非法配置时，诊断应标记 FAIL 并判定不通过", async () => {
     const badEnv = {

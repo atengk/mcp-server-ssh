@@ -172,6 +172,59 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
       status: "PASS",
       message: `环境变量解析强校验通过 (传输模式: ${parsedConfig.transport}, 超时: ${parsedConfig.timeoutMs}ms)`,
     });
+
+    // 3.2 安全审计合规性检查 (ADR-0014)
+    if (parsedConfig.audit.enabled) {
+      if (parsedConfig.audit.logPath) {
+        const logDir = path.dirname(parsedConfig.audit.logPath);
+        let writeable = true;
+        try {
+          // 纯只读探针：溯源至已存在的最近祖先目录检测写入权限，杜绝产生物理创建副作用
+          let targetDir = logDir;
+          while (!fs.existsSync(targetDir)) {
+            const parent = path.dirname(targetDir);
+            if (parent === targetDir) {
+              break;
+            }
+            targetDir = parent;
+          }
+          fs.accessSync(targetDir, fs.constants.W_OK);
+        } catch {
+          writeable = false;
+        }
+
+
+        if (writeable) {
+          checks.push({
+            category: "环境变量配置",
+            name: "安全审计轨迹 (ADR-0014)",
+            status: "PASS",
+            message: `安全审计已激活 (路径: ${parsedConfig.audit.logPath}, 切分上限: ${parsedConfig.audit.maxSizeMb}MB, 保留: ${parsedConfig.audit.maxFiles}份, 模式: ${parsedConfig.audit.strict ? "严格熔断" : "柔性降级"})`,
+          });
+        } else {
+          checks.push({
+            category: "环境变量配置",
+            name: "安全审计轨迹 (ADR-0014)",
+            status: parsedConfig.audit.strict ? "FAIL" : "WARN",
+            message: `安全审计日志目录不可写或无权限创建: ${logDir}`,
+          });
+        }
+      } else {
+        checks.push({
+          category: "环境变量配置",
+          name: "安全审计轨迹 (ADR-0014)",
+          status: "PASS",
+          message: `安全审计已激活 (输出目标: 标准错误流 stderr, 模式: ${parsedConfig.audit.strict ? "严格熔断" : "柔性降级"})`,
+        });
+      }
+    } else {
+      checks.push({
+        category: "环境变量配置",
+        name: "安全审计轨迹 (ADR-0014)",
+        status: "PASS",
+        message: "安全审计处于未启用状态 (MCP_SSH_AUDIT_ENABLED=false)",
+      });
+    }
   } catch (err) {
     checks.push({
       category: "环境变量配置",
@@ -180,6 +233,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
       message: `环境变量存在非法或模糊输入: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
+
 
   // ==========================================
   // 维度 4: 默认目标主机网络与 SSH 连通性探测

@@ -45,6 +45,12 @@ mcp-server-ssh v${SERVICE_VERSION}
   MCP_SSH_TIMEOUT               连接就绪超时毫秒数 (默认: 30000)
   MCP_SSH_KEEP_ALIVE_INTERVAL   心跳保活探测间隔毫秒数 (默认: 10000)
   MCP_SSH_ALLOW_DANGEROUS_COMMANDS 严格布尔值 ("true" | "false")，是否放行危险命令
+  MCP_SSH_AUDIT_ENABLED         是否启用安全审计 ("true" | "false"，配置路径时自动推导)
+  MCP_SSH_AUDIT_LOG_PATH        审计日志物理存储文件路径 (留空时输出至 stderr)
+  MCP_SSH_AUDIT_MAX_SIZE_MB     单日志文件轮转大小上限 MB (默认: 10)
+  MCP_SSH_AUDIT_MAX_FILES       保留的历史切分备份文件数量 (默认: 5)
+  MCP_SSH_AUDIT_STRICT          是否启用严格审计熔断 ("true" | "false"，默认: false 柔性降级)
+
 
 内置 MCP 工具能力矩阵 (共 29 项原子工具):
   - 核心执行: ssh_exec (无状态执行与 Sudo 提权), ssh_ping (网络心跳与延迟探测)

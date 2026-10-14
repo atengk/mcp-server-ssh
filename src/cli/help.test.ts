@@ -27,6 +27,8 @@ describe("CLI 帮助文档 (getHelpText)", () => {
     expect(text).toContain("MCP_SSH_USER");
     expect(text).toContain("MCP_SSH_PRIVATE_KEY_PATH");
     expect(text).toContain("MCP_SSH_ALLOW_DANGEROUS_COMMANDS");
+    expect(text).toContain("MCP_SSH_AUDIT_LOG_PATH");
     expect(text).toContain("共 29 项原子工具");
   });
 });
+

@@ -173,3 +173,21 @@ _Avoid_: Telemetry (遥测), Benchmark (性能基准测试)
 **Self-Inspection Doctor (自检诊断器)**:
 由 `--doctor` 标志触发的四维全景自检套件，串联运行环境、本地密钥、环境变量合规性与远程目标连通性测试，并输出结构化 PASS/WARN/FAIL 诊断报告与修复指引。
 _Avoid_: Health Check Endpoint (仅指 HTTP /health 探针), Debug Mode (调试模式)
+
+### 安全合规与审计跟踪 (Safety, Audit & Compliance)
+
+**Audit Trail (审计轨迹)**:
+按时间序列严格递增、完整记录 AI Agent 或宿主客户端发起之所有远程运维操作全生命周期的结构化不可变证据链。
+_Avoid_: System Log (系统常规日志), Debug Trace (调试追踪), Console Print
+
+**Audit Sink (审计汇聚端)**:
+负责对审计事件实施结构化序列化、文件尺寸滚动切割或标准流重定向的可插拔持久化中枢。
+_Avoid_: Logger Adapter, Output Stream (裸输出流), Collector Service
+
+**Audit Event (审计事件)**:
+包含事件唯一全局 ID、精确 ISO 时间戳、目标连接元数据、操作分类、安全脱敏入参、执行耗时及合规结果的原子不可变数据载荷。
+_Avoid_: Log Entry (普通日志条目), Log Line, Message Packet
+
+**Credential Sanitizer (凭据脱敏引擎)**:
+在审计事件持久化前深度遍历参数树并利用模式匹配强力遮蔽密码、私钥、Token 与内联命令凭据的安全防护管道。
+_Avoid_: Filter (模糊过滤器), Masker, Stripper

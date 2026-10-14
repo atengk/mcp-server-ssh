@@ -199,4 +199,34 @@ describe("ExecService 远程命令执行服务", () => {
     // 验证密码通过 channel stdin 流写入
     expect(mockClient.lastStream?.writtenData).toEqual(["custom-sudo-password\n"]);
   });
+
+  it("当注入了 AuditService 时，发生安全拦截与 Sudo 提权应记录内部 security 审计事件", async () => {
+    const auditEvents: any[] = [];
+    const mockAuditService = {
+      isEnabled: () => true,
+      log: vi.fn(async (event: any) => {
+        auditEvents.push(event);
+      }),
+    } as any;
+
+    const mockClient = new MockExecClient();
+    const pool = new ConnectionPool({
+      clientFactory: () => mockClient as any,
+    });
+    await pool.connect({ host: "127.0.0.1", username: "ubuntu", password: "pwd" });
+
+    const service = new ExecService({
+      connectionPool: pool,
+      auditService: mockAuditService,
+    });
+
+    // 1. 高危命令拦截测试
+    await expect(service.execute({ command: "rm -rf /" })).rejects.toThrow();
+    expect(auditEvents.some((e) => e.action === "safety_guard_blocked" && e.level === "security")).toBe(true);
+
+    // 2. Sudo 提权内部审计测试
+    await service.execute({ command: "apt-get update", sudo: true });
+    expect(auditEvents.some((e) => e.action === "escalate_sudo" && e.level === "security")).toBe(true);
+  });
 });
+

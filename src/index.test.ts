@@ -11,7 +11,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/manager.js";
-import { createMCPServer, startServer } from "./index.js";
+import { AuditService, createMCPServer, startServer } from "./index.js";
+
 
 class MockChannelStream extends EventEmitter {
   public stdout = new EventEmitter();
@@ -388,7 +389,14 @@ Host test-alias
       timeoutMs: 30000,
       keepAliveIntervalMs: 10000,
       allowDangerousCommands: false,
+      audit: {
+        enabled: false,
+        maxSizeMb: 10,
+        maxFiles: 5,
+        strict: false,
+      },
     };
+
 
     const stop = await startServer(pool, sseConfig);
     expect(typeof stop).toBe("function");
@@ -413,5 +421,57 @@ Host test-alias
     expect(data.status).toBe("started");
     expect(data.jobId).toMatch(/^job_/);
   });
+
+  it("应当支持端到端捕获全生命周期安全审计日志并对敏感参数执行清洗脱敏", async () => {
+    const auditEvents: any[] = [];
+    const mockSink = {
+      write: vi.fn((event: any) => {
+        auditEvents.push(event);
+      }),
+      close: vi.fn(),
+    };
+
+    const auditService = new AuditService(
+      {
+        enabled: true,
+        maxSizeMb: 10,
+        maxFiles: 5,
+        strict: false,
+      },
+      mockSink
+    );
+
+    const auditedServer = createMCPServer({
+      connectionPool: pool,
+      auditService,
+    });
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const testClient = new Client(
+      { name: "test-audit-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      auditedServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    const pingRes = await testClient.callTool({
+      name: "ssh_ping",
+      arguments: { message: "audit_test_echo" },
+    });
+    expect(pingRes.isError).toBeFalsy();
+
+    expect(auditEvents.length).toBe(1);
+    expect(auditEvents[0].action).toBe("ssh_ping");
+    expect(auditEvents[0].level).toBe("info");
+    expect(auditEvents[0].params.message).toBe("audit_test_echo");
+    expect(auditEvents[0].result.status).toBe("success");
+
+    await testClient.close();
+    await auditedServer.close();
+  });
 });
+
 

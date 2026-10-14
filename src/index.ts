@@ -21,6 +21,8 @@ import { JobService } from "./services/job-service.js";
 import { SystemService } from "./services/system-service.js";
 import { TunnelService } from "./services/tunnel-service.js";
 import { getHelpText, parseCLIArgs, runDoctor, SERVICE_VERSION } from "./cli/index.js";
+import { AuditService } from "./audit/index.js";
+
 import {
   ConfigHostInfoSchema,
   ConnectionInfoSchema,
@@ -80,6 +82,8 @@ export { TunnelService } from "./services/tunnel-service.js";
 export { JobService } from "./services/job-service.js";
 export { parseCLIArgs, getHelpText, SERVICE_VERSION, runDoctor } from "./cli/index.js";
 export type { CLIOptions, DoctorCheckItem, DoctorResult, DoctorStatus } from "./cli/index.js";
+export { AuditService } from "./audit/index.js";
+export * from "./audit/types.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -95,8 +99,10 @@ export interface MCPServerOptions {
   tunnelService?: TunnelService;
   systemService?: SystemService;
   jobService?: JobService;
+  auditService?: AuditService;
   allowDangerousCommands?: boolean;
 }
+
 
 
 /**
@@ -110,6 +116,9 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
   const pool = options?.connectionPool ?? new ConnectionPool({ configParser });
   const safetyGuard = options?.safetyGuard ?? new SafetyGuard();
   const outputTruncator = options?.outputTruncator ?? new OutputTruncator();
+  const auditService =
+    options?.auditService ??
+    new AuditService(parseEnv().audit);
   const execService =
     options?.execService ??
     new ExecService({
@@ -117,7 +126,9 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       safetyGuard,
       outputTruncator,
       allowDangerousCommands: options?.allowDangerousCommands,
+      auditService,
     });
+
   const sessionService =
     options?.sessionService ??
     new SessionService({
@@ -148,9 +159,33 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     });
 
   const server = new McpServer({
+
     name: "mcp-server-ssh",
     version: "1.2.0",
   });
+
+  // 透明装配全生命周期安全审计切面 (ADR-0014)
+  const originalRegisterTool = server.tool.bind(server);
+  (server as any).tool = (name: string, ...args: any[]) => {
+    if (args.length === 2 && typeof args[1] === "function") {
+      const [desc, handler] = args;
+      return (originalRegisterTool as any)(name, desc, async () => {
+        return auditService.recordToolCall(name, {}, async () => handler());
+      });
+    }
+    if (args.length >= 2 && typeof args[args.length - 1] === "function") {
+      const desc = args[0];
+      const schema = args[1];
+      const handler = args[args.length - 1];
+      return (originalRegisterTool as any)(name, desc, schema, async (params: any) => {
+        return auditService.recordToolCall(name, params as Record<string, unknown>, async () => {
+          return handler(params);
+        });
+      });
+    }
+    return (originalRegisterTool as any)(name, ...args);
+  };
+
 
   // 1. 注册基础心跳与连通性检测工具
   server.tool(
@@ -1125,10 +1160,12 @@ export async function startServer(
   const configParser = new SSHConfigParser();
   const pool = customPool ?? new ConnectionPool({ configParser });
   const tunnelService = new TunnelService({ connectionPool: pool });
+  const auditService = new AuditService(config.audit);
   const server = createMCPServer({
     connectionPool: pool,
     configParser,
     tunnelService,
+    auditService,
     allowDangerousCommands: config.allowDangerousCommands,
   });
 
@@ -1145,10 +1182,12 @@ export async function startServer(
     if (sseInstance) {
       await sseInstance.close();
     }
+    await auditService.close();
     await tunnelService.closeAll();
     await pool.closeAll();
     await server.close();
   };
+
 
 
   const onSignal = async () => {
@@ -1165,8 +1204,9 @@ export async function startServer(
       `[mcp-server-ssh] 服务正在通过 SSE HTTP 模式启动 (${config.serverHost}:${config.serverPort})...\n`
     );
     sseInstance = await startSSEServer({
-      serverFactory: () => createMCPServer({ connectionPool: pool, configParser }),
+      serverFactory: () => createMCPServer({ connectionPool: pool, configParser, auditService }),
       host: config.serverHost,
+
       port: config.serverPort,
       serviceVersion: "1.1.0",
     });

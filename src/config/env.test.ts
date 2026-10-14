@@ -268,4 +268,76 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       expect(params?.proxyJump).toBe("bastion.example.com:22");
     });
   });
+
+  describe("安全审计配置解析体系 (ADR-0014)", () => {
+    it("缺省环境下应返回默认关闭且合规的审计配置", () => {
+      const config = parseEnv({});
+      expect(config.audit).toEqual({
+        enabled: false,
+        logPath: undefined,
+        maxSizeMb: 10,
+        maxFiles: 5,
+        strict: false,
+      });
+    });
+
+    it("设置 MCP_SSH_AUDIT_LOG_PATH 时若未设置 ENABLED 则应自动激活", () => {
+      const config = parseEnv({
+        MCP_SSH_AUDIT_LOG_PATH: "/var/log/mcp_audit.log",
+      });
+      expect(config.audit.enabled).toBe(true);
+      expect(config.audit.logPath).toBe("/var/log/mcp_audit.log");
+      expect(config.audit.maxSizeMb).toBe(10);
+      expect(config.audit.maxFiles).toBe(5);
+      expect(config.audit.strict).toBe(false);
+    });
+
+    it("显式设置 MCP_SSH_AUDIT_ENABLED 为 false 时即使配置路径也不激活", () => {
+      const config = parseEnv({
+        MCP_SSH_AUDIT_ENABLED: "false",
+        MCP_SSH_AUDIT_LOG_PATH: "/var/log/mcp_audit.log",
+      });
+      expect(config.audit.enabled).toBe(false);
+      expect(config.audit.logPath).toBe("/var/log/mcp_audit.log");
+    });
+
+    it("显式设置 MCP_SSH_AUDIT_ENABLED 为 true 但未设置路径时仍激活 (输出至 stderr)", () => {
+      const config = parseEnv({
+        MCP_SSH_AUDIT_ENABLED: "true",
+      });
+      expect(config.audit.enabled).toBe(true);
+      expect(config.audit.logPath).toBeUndefined();
+    });
+
+    it("支持自定义轮转文件大小与备份文件数，且严格正整数校验", () => {
+      const config = parseEnv({
+        MCP_SSH_AUDIT_LOG_PATH: "audit.log",
+        MCP_SSH_AUDIT_MAX_SIZE_MB: "50",
+        MCP_SSH_AUDIT_MAX_FILES: "10",
+        MCP_SSH_AUDIT_STRICT: "true",
+      });
+      expect(config.audit.maxSizeMb).toBe(50);
+      expect(config.audit.maxFiles).toBe(10);
+      expect(config.audit.strict).toBe(true);
+
+      expect(() =>
+        parseEnv({
+          MCP_SSH_AUDIT_MAX_SIZE_MB: "-1",
+        })
+      ).toThrow(/必须为正整数/);
+
+      expect(() =>
+        parseEnv({
+          MCP_SSH_AUDIT_MAX_FILES: "0",
+        })
+      ).toThrow(/必须为正整数/);
+
+      expect(() =>
+        parseEnv({
+          MCP_SSH_AUDIT_STRICT: "not_boolean",
+        })
+      ).toThrow(/必须为合法的布尔值/);
+    });
+  });
 });
+
