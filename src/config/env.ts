@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import type { ProxyJumpOptions, SSHConnectParams } from "../types/connection.js";
+import { isLoopbackHost } from "../server/sse-server.js";
 
 /**
  * 通信传输协议枚举
@@ -263,7 +264,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  const serverHost = getEnvValue(env, "MCP_SSH_SERVER_HOST") || "0.0.0.0";
+  const serverHost = getEnvValue(env, "MCP_SSH_SERVER_HOST") || "127.0.0.1";
   const serverPort = parsePort(
     getEnvValue(env, "MCP_SSH_SERVER_PORT"),
     8000,
@@ -366,6 +367,13 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   // 7. SSE 身份鉴权令牌 (ADR-0017)
   const authToken = getEnvValue(env, "MCP_SSH_AUTH_TOKEN");
+
+  // SSE 外部网络绑定强制熔断 (Fail-Closed) 校验
+  if (transport === "sse" && !isLoopbackHost(serverHost) && !authToken) {
+    throw new Error(
+      `[mcp-server-ssh] 安全熔断: 外部网络绑定 (${serverHost}) 必须配置 MCP_SSH_AUTH_TOKEN (Fail-Closed)`
+    );
+  }
 
   // 8. 目标白名单与动态建连约束 (ADR-0017)
   const allowedTargetsRaw = getEnvValue(env, "MCP_SSH_ALLOWED_TARGETS");

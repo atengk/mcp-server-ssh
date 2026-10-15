@@ -13,7 +13,7 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
     const config = parseEnv({});
 
     expect(config.transport).toBe("stdio");
-    expect(config.serverHost).toBe("0.0.0.0");
+    expect(config.serverHost).toBe("127.0.0.1");
     expect(config.serverPort).toBe(8000);
     expect(config.timeoutMs).toBe(30000);
     expect(config.keepAliveIntervalMs).toBe(10000);
@@ -31,7 +31,7 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       SSH_TIMEOUT: "45000",
       SSH_ALLOW_DANGEROUS_COMMANDS: "true",
       PORT: "9000",
-      HOST: "127.0.0.1",
+      HOST: "0.0.0.0",
       SSH_TRANSPORT: "sse",
       MCP_TRANSPORT: "sse",
     };
@@ -40,11 +40,46 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
 
     // 均保持默认值，遗留变量未被读取
     expect(config.transport).toBe("stdio");
-    expect(config.serverHost).toBe("0.0.0.0");
+    expect(config.serverHost).toBe("127.0.0.1");
     expect(config.serverPort).toBe(8000);
     expect(config.timeoutMs).toBe(30000);
     expect(config.allowDangerousCommands).toBe(false);
     expect(config.target).toBeUndefined();
+  });
+
+  it("SSE 模式下外部非回环绑定且未配置 MCP_SSH_AUTH_TOKEN 时应触发安全熔断 (Fail-Closed)", () => {
+    expect(() =>
+      parseEnv({
+        MCP_SSH_TRANSPORT: "sse",
+        MCP_SSH_SERVER_HOST: "0.0.0.0",
+      })
+    ).toThrowError(/安全熔断: 外部网络绑定 \(0\.0\.0\.0\) 必须配置 MCP_SSH_AUTH_TOKEN/);
+
+    expect(() =>
+      parseEnv({
+        MCP_SSH_TRANSPORT: "sse",
+        MCP_SSH_SERVER_HOST: "192.168.1.100",
+      })
+    ).toThrowError(/安全熔断/);
+  });
+
+  it("SSE 模式下外部非回环绑定但配置了 MCP_SSH_AUTH_TOKEN 应正常通过", () => {
+    const config = parseEnv({
+      MCP_SSH_TRANSPORT: "sse",
+      MCP_SSH_SERVER_HOST: "0.0.0.0",
+      MCP_SSH_AUTH_TOKEN: "valid-secret-token",
+    });
+    expect(config.serverHost).toBe("0.0.0.0");
+    expect(config.authToken).toBe("valid-secret-token");
+  });
+
+  it("SSE 模式下回环地址绑定即使未提供 MCP_SSH_AUTH_TOKEN 也允许启动 (本地开发豁免)", () => {
+    const config = parseEnv({
+      MCP_SSH_TRANSPORT: "sse",
+      MCP_SSH_SERVER_HOST: "127.0.0.1",
+    });
+    expect(config.serverHost).toBe("127.0.0.1");
+    expect(config.authToken).toBeUndefined();
   });
 
   it("官方标准前缀 MCP_SSH_* 才能正确被解析生效", () => {

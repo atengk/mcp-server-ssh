@@ -93,15 +93,53 @@ function setCorsHeaders(res: ServerResponse): void {
 }
 
 /**
+ * 判断指定主机地址是否属于本地回环地址 (ADR-0017)
+ *
+ * @param host 待检测主机地址
+ * @return 属于回环地址时返回 true，否则返回 false
+ */
+export function isLoopbackHost(host: string): boolean {
+  const trimmed = host.trim().toLowerCase();
+  if (trimmed === "localhost" || trimmed === "::1" || trimmed === "[::1]") {
+    return true;
+  }
+  if (trimmed.startsWith("127.")) {
+    const parts = trimmed.split(".");
+    if (
+      parts.length === 4 &&
+      parts.every((p) => {
+        const n = Number.parseInt(p, 10);
+        return !Number.isNaN(n) && n >= 0 && n <= 255;
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 创建并启动 MCP SSE HTTP 服务器
  *
  * @param options SSE 启动参数
  * @return 包含监听信息与优雅停机控制的 RunningSSEServer 实例
  */
 export async function startSSEServer(options: SSEServerOptions): Promise<RunningSSEServer> {
-  const host = options.host || "0.0.0.0";
+  const host = options.host || "127.0.0.1";
   const targetPort = options.port !== undefined ? options.port : 8000;
   const version = options.serviceVersion || "1.1.0";
+
+  // 外部网络绑定强制熔断 (Fail-Closed) 与本地回环告警 (ADR-0017)
+  if (!isLoopbackHost(host) && !options.authToken) {
+    throw new Error(
+      `[mcp-server-ssh] 安全熔断: 外部网络绑定 (${host}) 必须配置 MCP_SSH_AUTH_TOKEN (Fail-Closed)`
+    );
+  }
+  if (isLoopbackHost(host) && !options.authToken) {
+    process.stderr.write(
+      "[mcp-server-ssh] 安全告警: 服务绑定于回环地址且未配置身份验证令牌 (MCP_SSH_AUTH_TOKEN)，仅建议用于本地开发测试\n"
+    );
+  }
 
   // 活跃会话与专属 MCP Server 实例管理器
   const activeTransports = new Map<string, SSEServerTransport>();
@@ -121,17 +159,10 @@ export async function startSSEServer(options: SSEServerOptions): Promise<Running
     const parsedUrl = new URL(reqUrl, `http://${req.headers.host || "localhost"}`);
     const pathname = parsedUrl.pathname;
 
-    // 2. 健康检查端点
-    if ((pathname === "/" || pathname === "/health" || pathname === "/ping") && req.method === "GET") {
+    // 2. 健康检查探针端点 (脱敏最小化响应)
+    if ((pathname === "/health" || pathname === "/ping") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          service: "mcp-server-ssh",
-          version,
-          activeConnections: activeTransports.size,
-        })
-      );
+      res.end(JSON.stringify({ status: "healthy" }));
       return;
     }
 

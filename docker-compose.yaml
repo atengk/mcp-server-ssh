@@ -17,6 +17,8 @@ services:
       - MCP_SSH_TRANSPORT=sse
       - MCP_SSH_SERVER_HOST=0.0.0.0
       - MCP_SSH_SERVER_PORT=8000
+      # 外部非回环绑定必须配置强身份鉴权令牌 (可通过 openssl rand -hex 32 随机生成，防范未授权命令调用)
+      - MCP_SSH_AUTH_TOKEN=${MCP_SSH_AUTH_TOKEN:-change_me_to_your_secure_random_token}
 
       # 2. 默认目标服务器预建连配置 (方式 A: 纯环境变量直连，无需挂载物理文件)
       - MCP_SSH_HOST=192.168.1.100

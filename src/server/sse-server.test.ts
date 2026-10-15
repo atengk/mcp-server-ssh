@@ -47,19 +47,30 @@ describe("HTTP SSE 传输服务 (SSEServer)", () => {
     }
   });
 
-  it("健康检查端点 GET /health 应返回 200 与服务元数据", async () => {
-    const res = await fetch(`${baseUrl}/health`);
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.status).toBe("ok");
-    expect(data.service).toBe("mcp-server-ssh");
+  it("健康检查端点 GET /health 与 GET /ping 应返回脱敏的 healthy 状态 (无内部版本或连接数)", async () => {
+    const resHealth = await fetch(`${baseUrl}/health`);
+    expect(resHealth.status).toBe(200);
+    const dataHealth = await resHealth.json();
+    expect(dataHealth).toEqual({ status: "healthy" });
+
+    const resPing = await fetch(`${baseUrl}/ping`);
+    expect(resPing.status).toBe(200);
+    const dataPing = await resPing.json();
+    expect(dataPing).toEqual({ status: "healthy" });
   });
 
-  it("根路径 GET / 应返回健康检查状态", async () => {
+  it("根路径 GET / 不再暴露健康检查，应返回 404 Not Found", async () => {
     const res = await fetch(`${baseUrl}/`);
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.status).toBe("ok");
+    expect(res.status).toBe(404);
+  });
+
+  it("非回环绑定且未配置 authToken 时启动 startSSEServer 应抛出安全熔断异常", async () => {
+    await expect(
+      startSSEServer({
+        host: "0.0.0.0",
+        port: 0,
+      })
+    ).rejects.toThrowError(/安全熔断: 外部网络绑定 \(0\.0\.0\.0\) 必须配置 MCP_SSH_AUTH_TOKEN/);
   });
 
   it("处理 CORS OPTIONS 预检请求应返回 204 及正确标头", async () => {
