@@ -98,6 +98,26 @@ _Avoid_: Proxy String, Raw Proxy
 在 `sse` 传输模式下由 HTTP 服务在 `/health` 暴露的轻量无状态检测端点，供 Docker、K8s 或负载均衡器探测服务就绪（Readiness）与存活（Liveness）状态。
 _Avoid_: Ping, Heartbeat Endpoint, Status Page
 
+**SSE Auth Token (SSE 身份鉴权令牌)**:
+在 `sse` 传输模式下用于对入站 HTTP 请求实施强身份校验的共享安全凭证，支持请求头 Bearer 与 Query 参数双向认证。
+_Avoid_: API Key, Password, Session Cookie
+
+**Loopback Binding (回环地址绑定)**:
+将网络服务默认监听地址严格限定为 `127.0.0.1`，仅对宿主机本地可达以规避内网/公网未授权探测的安全基线机制。
+_Avoid_: Localhost, Local Binding, Internal Host
+
+**Fail-Closed Binding (暴露强制熔断)**:
+在网络服务绑定非回环地址（如 `0.0.0.0`）且未配置有效鉴权令牌时，系统坚决拒绝启动并立即退出进程的硬阻断机制。
+_Avoid_: Permissive Startup, Warning Fallback
+
+**Target Allowlist (目标主机白名单)**:
+约束动态 `ssh_connect` 连接仅允许指向指定 IP、CIDR 网段或合法域名通配符的访问控制规则。
+_Avoid_: Host Blacklist, Target Filter
+
+**Origin Whitelist (来源跨域白名单)**:
+用于废除通配符 `*` 并精确比对入站浏览器请求来源以防御跨站攻击（CSRF / DNS Rebinding）的 CORS 安全配置。
+_Avoid_: Permissive CORS, Wildcard Origin
+
 ### 开源工程与持续集成规范 (Open Source Engineering & CI/CD)
 
 **Semantic PR Title (语义化 PR 标题)**:
