@@ -60,6 +60,10 @@ export interface SSEServerOptions {
    * SSE 共享身份鉴权令牌 (ADR-0017)
    */
   authToken?: string;
+  /**
+   * 允许跨域请求的来源 Origin 白名单列表 (ADR-0017)
+   */
+  allowedOrigins?: string[];
 }
 
 /**
@@ -73,22 +77,23 @@ export interface RunningSSEServer {
 }
 
 /**
- * 跨域资源共享 (CORS) 标准响应标头集合
- */
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS, HEAD",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-};
-
-/**
- * 为 HTTP 响应写入通用 CORS 标头
+ * 根据 Origin 白名单安全写入 CORS 标头 (彻底废除通配符 *) (ADR-0017)
  *
+ * @param req HTTP 请求对象
  * @param res HTTP 响应对象
+ * @param allowedOrigins 允许的来源白名单
  */
-function setCorsHeaders(res: ServerResponse): void {
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    res.setHeader(key, value);
+function applyCorsHeaders(req: IncomingMessage, res: ServerResponse, allowedOrigins?: string[]): void {
+  const origin = req.headers.origin;
+  if (!origin || !allowedOrigins || allowedOrigins.length === 0) {
+    return;
+  }
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin");
   }
 }
 
@@ -146,7 +151,7 @@ export async function startSSEServer(options: SSEServerOptions): Promise<Running
   const activeServers = new Map<string, McpServer>();
 
   const httpServer = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    setCorsHeaders(res);
+    applyCorsHeaders(req, res, options.allowedOrigins);
 
     // 1. 处理 CORS 预检请求
     if (req.method === "OPTIONS") {

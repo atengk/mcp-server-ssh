@@ -73,14 +73,56 @@ describe("HTTP SSE 传输服务 (SSEServer)", () => {
     ).rejects.toThrowError(/安全熔断: 外部网络绑定 \(0\.0\.0\.0\) 必须配置 MCP_SSH_AUTH_TOKEN/);
   });
 
-  it("处理 CORS OPTIONS 预检请求应返回 204 及正确标头", async () => {
-    const res = await fetch(`${baseUrl}/sse`, {
-      method: "OPTIONS",
+  describe("CORS 跨域策略与来源白名单 (Origin Whitelist)", () => {
+    it("默认未配置 allowedOrigins 时不应返回允许跨域标头与通配符 *", async () => {
+      const res = await fetch(`${baseUrl}/sse`, {
+        method: "OPTIONS",
+        headers: { Origin: "http://malicious.example.com" },
+      });
+      expect(res.status).toBe(204);
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
     });
-    expect(res.status).toBe(204);
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
-    expect(res.headers.get("access-control-allow-methods")).toContain("GET");
-    expect(res.headers.get("access-control-allow-methods")).toContain("POST");
+
+    it("配置 allowedOrigins 后，命中白名单的 Origin 应返回对应的 CORS 响应标头与凭证支持，非白名单 Origin 不返回", async () => {
+      const corsServer = await startSSEServer({
+        allowedOrigins: ["http://localhost:3000", "https://chat.mycorp.internal"],
+        serverFactory: () =>
+          new McpServer({
+            name: "mcp-server-ssh-cors-test",
+            version: "1.0.0-test",
+          }),
+        host: "127.0.0.1",
+        port: 0,
+      });
+      const corsUrl = `http://127.0.0.1:${corsServer.port}`;
+
+      try {
+        // 1. 命中白名单的 OPTIONS 预检请求
+        const preflight = await fetch(`${corsUrl}/sse`, {
+          method: "OPTIONS",
+          headers: { Origin: "http://localhost:3000" },
+        });
+        expect(preflight.status).toBe(204);
+        expect(preflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+        expect(preflight.headers.get("access-control-allow-credentials")).toBe("true");
+
+        // 2. 命中白名单的普通 GET 请求
+        const getRes = await fetch(`${corsUrl}/health`, {
+          headers: { Origin: "https://chat.mycorp.internal" },
+        });
+        expect(getRes.status).toBe(200);
+        expect(getRes.headers.get("access-control-allow-origin")).toBe("https://chat.mycorp.internal");
+
+        // 3. 未命中白名单的恶意 Origin 请求
+        const evilRes = await fetch(`${corsUrl}/health`, {
+          headers: { Origin: "http://evil.com" },
+        });
+        expect(evilRes.status).toBe(200);
+        expect(evilRes.headers.get("access-control-allow-origin")).toBeNull();
+      } finally {
+        await corsServer.close();
+      }
+    });
   });
 
   it("访问未知路径应返回 404", async () => {

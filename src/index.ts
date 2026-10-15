@@ -1266,6 +1266,7 @@ export async function startServer(
       port: config.serverPort,
       serviceVersion: "1.1.0",
       authToken: config.authToken,
+      allowedOrigins: config.allowedOrigins,
     });
 
     process.stderr.write(

@@ -105,6 +105,10 @@ export interface AppConfig {
    * 是否禁用动态建连工具调用 (ADR-0017)
    */
   disableDynamicConnect: boolean;
+  /**
+   * 允许跨域请求的来源 Origin 白名单列表 (ADR-0017)
+   */
+  allowedOrigins?: string[];
 }
 
 
@@ -389,6 +393,15 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     "MCP_SSH_DISABLE_DYNAMIC_CONNECT"
   );
 
+  // 9. CORS 来源白名单 (ADR-0017)
+  const allowedOriginsRaw = getEnvValue(env, "MCP_SSH_ALLOWED_ORIGINS");
+  const allowedOrigins = allowedOriginsRaw
+    ? allowedOriginsRaw
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0)
+    : undefined;
+
   return {
     transport,
     serverHost,
@@ -404,6 +417,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     authToken,
     allowedTargets,
     disableDynamicConnect,
+    allowedOrigins,
   };
 }
 

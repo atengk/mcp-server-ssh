@@ -276,6 +276,16 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
         })
       ).toThrowError(/必须为合法的布尔值/);
     });
+
+    it("正确解析 MCP_SSH_ALLOWED_ORIGINS 逗号分隔白名单并去除首尾空格", () => {
+      const config = parseEnv({
+        MCP_SSH_ALLOWED_ORIGINS: " http://localhost:3000 , https://chat.internal.example.com ",
+      });
+      expect(config.allowedOrigins).toEqual([
+        "http://localhost:3000",
+        "https://chat.internal.example.com",
+      ]);
+    });
   });
 
   describe("预建连参数装配 (getPreConnectParams)", () => {
