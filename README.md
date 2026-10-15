@@ -8,7 +8,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-1.x-orange.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/tests-184%2F184%20passing-brightgreen.svg?style=flat-square)](./src)
+[![Tests](https://img.shields.io/badge/tests-210%2F210%20passing-brightgreen.svg?style=flat-square)](./src)
 
 基于标准 **OpenSSH 协议** 深度连接与操控 Linux/Unix 系统的 **Model Context Protocol (MCP)** 服务。为大语言模型（LLM）和 AI 智能体（Claude Desktop、Cursor、Antigravity、Cline 等）提供安全、可控、零侵入的远程终端执行与 POSIX 文件系统管理基础设施。
 
@@ -28,6 +28,11 @@
   - **纯 JS 流式 Tar 目录双向同步 (`sftp_*_dir`)**：支持排除过滤与自动继承 `.gitignore`，零 C++ 原生编译依赖（[ADR-0008](docs/adr/0008-pure-js-tar-directory-transfer.md)）；
   - **基础文件管理**：单文件安全读写（内置防撑爆阈值）、元数据获取、目录递归建删与软链接防环保护。
 - **🔌 三位一体网络隧道治理 (`ssh_forward_port`)**：统一管控本地转发（Local）、远程暴露（Remote）与 **纯 JS RFC 1928 动态 SOCKS5 代理**，内置空闲超时自动熔断与物理断连级联回收（[ADR-0011](docs/adr/0011-zero-leak-sudo-and-unified-tunnel-governance.md)）。
+- **🛡️ 网络安全与网络暴露收敛**（[ADR-0017](docs/adr/0017-sse-auth-binding-defense-and-surface-hardening.md)）：
+  - **常数时间 SSE 强身份鉴权**：支持 Header Bearer 与 Query Token，双重 SHA-256 常数时间比对防时序攻击；
+  - **默认回环与暴露强制熔断 (Fail-Closed)**：默认收敛绑定 `127.0.0.1`，外部暴露未配置 Token 立即终止启动；
+  - **目标主机白名单 (`Target Allowlist`)**：支持 IP、CIDR 网段、通配符域名与端口约束，阻断内网横向跳板渗透；
+  - **来源白名单与跨域重塑 (`Origin Whitelist`)**：彻底废除通配符 `*`，精确匹配请求来源以防御跨站攻击。
 - **🏷️ 多实例服务标识与引导指示 (`--server-name` / `--server-instructions`)**：协议级一等公民下发，在多服务并存时向大模型精准传递系统角色定位，工具描述自动修饰紧凑前缀（[ADR-0015](docs/adr/0015-multi-instance-server-identity-and-instructions.md)）。
 - **📜 全景生命周期安全审计 (`AuditService`)**：记录全量 29 个原子工具调用的调用源、入参深度凭据脱敏（密码/私钥自动打码掩饰）与执行耗时，支持纯 Node 原生免依赖多文件轮转切分（[ADR-0014](docs/adr/0014-audit-trail-and-security-compliance.md)）。
 - **🩺 四维全景自检排障套件 (`--doctor`)**：涵盖 Runtime 运行时、本地 OpenSSH 密钥链、配置合规性与目标连通性全方位秒级诊断巡检（[ADR-0013](docs/adr/0013-cli-suite-and-health-doctor.md)）。
@@ -54,13 +59,13 @@
         "MCP_SSH_HOST": "192.168.1.100",
         "MCP_SSH_PORT": "22",
         "MCP_SSH_USER": "root",
-        "MCP_SSH_KEY_PATH": "/Users/yourname/.ssh/id_ed25519"
+        "MCP_SSH_PRIVATE_KEY_PATH": "/Users/yourname/.ssh/id_ed25519"
       }
     }
   }
 }
 ```
-> 💡 **向后兼容提示**：服务已全面升级为规范的 `MCP_SSH_*` 专属命名空间，同时 100% 透明向下兼容遗留的 `SSH_*` 环境变量，老用户无需修改已有配置即可平滑升级。
+> 🔒 **单一规范命名空间提示 (ADR-0012)**：服务严格仅识别 `MCP_SSH_*` 规范命名空间环境变量。布尔变量严格仅接受 `"true"` 或 `"false"`。请务必使用官方规范键名以确保配置生效。
 
 ---
 
@@ -98,7 +103,7 @@
         "MCP_SSH_HOST": "192.168.1.100",
         "MCP_SSH_PORT": "22",
         "MCP_SSH_USER": "root",
-        "MCP_SSH_KEY_PATH": "D:/files/server/id_ed25519",
+        "MCP_SSH_PRIVATE_KEY_PATH": "D:/files/server/id_ed25519",
         "MCP_SSH_KEY_PASSPHRASE": "optional_passphrase"
       }
     }
@@ -124,8 +129,8 @@
 }
 ```
 
-### 场景 4：企业级 ProxyJump 堡垒机/跳板机隧道
-通过公网跳板机（Bastion）安全穿透至隔离内网中的私有目标服务器：
+### 场景 4：企业级 ProxyJump 堡垒机/跳板机穿透预建连
+通过公网跳板机（Bastion）安全穿透至隔离内网中的私有目标服务器（**注意：`MCP_SSH_PROXY_*` 仅专用于物理建连中继跳板，与会话内动态端口转发 `ssh_forward_port` 完全解耦**）：
 ```json
 {
   "mcpServers": {
@@ -145,57 +150,67 @@
 }
 ```
 
-### 场景 5：纯空载启动 (在会话中动态管理多主机)
-启动时不配置任何环境变量，后续在对话中直接通过自然语言指示 AI 连接或切换不同的主机：
+### 场景 5：云原生网络常驻 SSE 模式 (强身份鉴权 + 来源/目标双白名单)
+常驻部署于容器、Kubernetes 或内网跳板节点，强制启用 Token 鉴权与目标收敛：
 ```json
 {
   "mcpServers": {
-    "ssh": {
-      "command": "npx",
-      "args": ["-y", "@atengk/mcp-server-ssh"]
+    "ssh-remote": {
+      "url": "http://192.168.1.100:8000/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_GENERATED_SECRET_TOKEN"
+      }
     }
   }
 }
 ```
+> 💡 **空载按需连接模式**：若启动时不提供任何预建连环境变量，服务将以空载状态启动，AI 智能体将在会话中通过 `ssh_connect` 按需连接主机。若设置了 `MCP_SSH_ALLOWED_TARGETS`，所有连接将受目标白名单强约束；设置 `MCP_SSH_DISABLE_DYNAMIC_CONNECT=true` 则彻底关闭动态建连。
 
 ---
 
 ## 🌐 环境变量完整速查矩阵 (12-Factor App)
 
-全面遵循现代化 **12-Factor App** 规范，服务提供官方主前缀 `MCP_SSH_*` 规范变量与向下兼容变量双重支持：
+全面遵循现代化 **12-Factor App** 与 **ADR-0012** 单一命名空间治理规范，服务严格仅识别 `MCP_SSH_*` 官方标准前缀，彻底摒弃遗留多别名推断，所有布尔变量严格要求 `"true"` 或 `"false"`：
 
-| 分类 | 推荐主环境变量 | 宽容兼容变量 | 默认值 / 行为说明 |
+| 配置分类 | 规范环境变量 (`MCP_SSH_*`) | 类型 / 取值约束 | 默认值 / 行为说明 |
 | :--- | :--- | :--- | :--- |
-| **传输协议** | `MCP_SSH_TRANSPORT` | `SSH_TRANSPORT` / `MCP_TRANSPORT` | `stdio`（本地单机）、`sse`（网络/容器常驻） |
-| **服务监听地址**| `MCP_SSH_SERVER_HOST` | `SSH_SERVER_HOST` / `HOST` | SSE 模式监听地址，默认 `0.0.0.0` |
-| **服务监听端口**| `MCP_SSH_SERVER_PORT` | `SSH_SERVER_PORT` / `PORT` | SSE 模式监听端口，默认 `8000` |
-| **目标主机地址**| `MCP_SSH_HOST` | `SSH_HOST` | 目标 Linux 服务器 IP 或域名（提供时触发自动建连） |
-| **目标主机端口**| `MCP_SSH_PORT` | `SSH_PORT` | 目标 SSH 端口号，默认 `22` (1~65535) |
-| **认证用户名** | `MCP_SSH_USER` | `SSH_USER` / `SSH_USERNAME` | 登录用户名（缺省自动探测系统用户） |
-| **认证密码** | `MCP_SSH_PASSWORD` | `SSH_PASSWORD` | 明文密码（日志与输出中强制掩码 `***` 脱敏） |
-| **私钥文件路径**| `MCP_SSH_KEY_PATH` | `SSH_KEY_PATH` / `SSH_PRIVATE_KEY_PATH` | 本地私钥绝对或 `~` 家目录路径 |
-| **私钥文本内容**| `MCP_SSH_PRIVATE_KEY` | `SSH_PRIVATE_KEY` | 原始 PEM 格式私钥文本（自动还原 `\n` 转义换行） |
-| **Base64 私钥** | `MCP_SSH_PRIVATE_KEY_BASE64`| `SSH_PRIVATE_KEY_BASE64` | **Base64 编码私钥（彻底避免换行丢失，免文件挂载！）** |
-| **私钥解密口令**| `MCP_SSH_KEY_PASSPHRASE`| `SSH_KEY_PASSPHRASE` | 若私钥受密码保护，提供解密口令 |
-| **配置别名** | `MCP_SSH_CONFIG_ALIAS`| `SSH_CONFIG_ALIAS` | 继承本地 `~/.ssh/config` 中的 Host 别名 |
-| **服务身份名称**| `MCP_SSH_SERVER_NAME` | - | 自定义服务唯一命名空间（默认 `mcp-server-ssh`，非默认值触发工具描述前缀） |
-| **服务引导指示**| `MCP_SSH_SERVER_INSTRUCTIONS`| - | 系统级服务角色与操作边界引导说明上下文（握手阶段下发给大模型） |
-| **安全审计开关**| `MCP_SSH_AUDIT_ENABLED`| - | 是否激活全景审计轨迹（`true`/`false`，配置日志路径时自动开启） |
-| **审计日志路径**| `MCP_SSH_AUDIT_LOG_PATH`| - | 审计日志文件绝对/相对路径（缺省时输出至 stderr） |
-| **审计切分大小**| `MCP_SSH_AUDIT_MAX_SIZE_MB`| - | 单日志文件滚动轮转阈值（MB），默认 `10` |
-| **审计保留份数**| `MCP_SSH_AUDIT_MAX_FILES`| - | 历史切分备份文件保留份数上限，默认 `5` |
-| **审计熔断模式**| `MCP_SSH_AUDIT_STRICT` | - | 是否启用审计失败严格熔断（`true`/`false`，默认 `false` 柔性降级） |
-| **跳板机主机** | `MCP_SSH_PROXY_HOST` | `SSH_PROXY_HOST` | ProxyJump 堡垒机/跳板机 IP 或域名 |
-| **跳板机端口** | `MCP_SSH_PROXY_PORT` | `SSH_PROXY_PORT` | 跳板机端口，默认 `22` |
-| **跳板机用户** | `MCP_SSH_PROXY_USER` | `SSH_PROXY_USER` | 跳板机登录用户名 |
-| **跳板机密码** | `MCP_SSH_PROXY_PASSWORD`| `SSH_PROXY_PASSWORD` | 跳板机认证密码（可选） |
-| **跳板机私钥** | `MCP_SSH_PROXY_PRIVATE_KEY_BASE64`| `SSH_PROXY_PRIVATE_KEY` | 跳板机专用私钥文本或 Base64 编码（可选） |
-| **跳板机私钥口令**| `MCP_SSH_PROXY_KEY_PASSPHRASE`| `SSH_PROXY_KEY_PASSPHRASE` | 跳板机私钥解密口令（可选） |
-| **建连超时时间**| `MCP_SSH_TIMEOUT` | `SSH_TIMEOUT` | 目标建连超时时间（毫秒），默认 `30000` |
-| **心跳保活间隔**| `MCP_SSH_KEEP_ALIVE_INTERVAL`| `SSH_KEEP_ALIVE_INTERVAL` | KeepAlive 心跳间隔（毫秒），默认 `10000` |
-| **致命命令逃生门**| `MCP_SSH_ALLOW_DANGEROUS_COMMANDS`| `SSH_ALLOW_DANGEROUS_COMMANDS` | 宽容布尔值（`1`/`true`/`yes`），默认 `false` 严格阻断 |
+| **传输协议** | `MCP_SSH_TRANSPORT` | 枚举: `"stdio"` \| `"sse"` | 默认 `stdio`（本地宿主管道），`sse` 为网络/容器常驻模式 |
+| **服务监听地址** | `MCP_SSH_SERVER_HOST` | IPv4 / 域名 / 回环 | 默认 `127.0.0.1`（安全回环绑定；配置为 `0.0.0.0` 等非回环外部暴露时**强制要求提供 Token，否则启动熔断终止**） |
+| **服务监听端口** | `MCP_SSH_SERVER_PORT` | 整数: `1` ~ `65535` | 默认 `8000` |
+| **网络边界安全** | `MCP_SSH_AUTH_TOKEN` | 敏感字符串 | SSE 模式强身份鉴权令牌（支持 Header Bearer 与 URL Query，双 SHA-256 常数时间防时序攻击） |
+| **网络边界安全** | `MCP_SSH_ALLOWED_ORIGINS` | 逗号分隔字符串 | CORS 跨域请求来源 Origin 白名单（废除通配符 `*`，未命中或未配置时一律拒绝跨域头） |
+| **网络边界安全** | `MCP_SSH_ALLOWED_TARGETS` | 逗号分隔规则列表 | 出站目标与跳板机白名单列表（支持单个 IP/域名、带端口、CIDR 网段如 `10.0.0.0/8` 及通配符域名如 `*.internal.corp`） |
+| **网络边界安全** | `MCP_SSH_DISABLE_DYNAMIC_CONNECT` | 严格布尔: `"true"` \| `"false"` | 默认 `false`。设为 `true` 时彻底禁用动态 `ssh_connect` 工具，锁定为仅使用预建连目标或本地别名 |
+| **默认目标主机** | `MCP_SSH_HOST` | 主机名 / IP 地址 | 预建连默认目标 Linux 服务器 IP 或域名（提供时启动自动建连） |
+| **默认目标端口** | `MCP_SSH_PORT` | 整数: `1` ~ `65535` | 默认目标 SSH 端口号，默认 `22` |
+| **认证用户名** | `MCP_SSH_USER` | 字符串 | 预建连登录用户名（缺省时自动探测本地当前系统用户名） |
+| **认证密码** | `MCP_SSH_PASSWORD` | 敏感字符串 | 预建连明文密码（日志、审计与输出中强制掩码 `***` 脱敏） |
+| **私钥文件路径** | `MCP_SSH_PRIVATE_KEY_PATH` | 本地文件路径 | 预建连私钥文件绝对路径（统一锁定为 `PRIVATE_KEY_PATH`） |
+| **私钥文本内容** | `MCP_SSH_PRIVATE_KEY` | PEM 多行文本 | 原始 PEM 格式私钥文本（自动还原环境转义的 `\n` 换行） |
+| **Base64 私钥** | `MCP_SSH_PRIVATE_KEY_BASE64` | Base64 编码字符串 | Base64 编码私钥（彻底避免换行丢失，容器与云原生免文件挂载规范推荐） |
+| **私钥解密口令** | `MCP_SSH_KEY_PASSPHRASE` | 敏感字符串 | 若私钥受密码保护，提供解密口令 |
+| **配置别名** | `MCP_SSH_CONFIG_ALIAS` | 字符串 | 匹配并继承本地 `~/.ssh/config` 中的 Host 别名 |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_HOST` | 主机名 / IP 地址 | ProxyJump 堡垒机/跳板机 IP 或域名（专用于初始物理建连） |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_PORT` | 整数: `1` ~ `65535` | ProxyJump 跳板机 SSH 端口，默认 `22` |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_USER` | 字符串 | ProxyJump 跳板机认证用户名 |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_PASSWORD` | 敏感字符串 | ProxyJump 跳板机认证密码（可选） |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_PRIVATE_KEY_BASE64` | Base64 编码字符串 | ProxyJump 跳板机专用私钥（可选） |
+| **ProxyJump 跳板** | `MCP_SSH_PROXY_KEY_PASSPHRASE` | 敏感字符串 | ProxyJump 跳板机私钥解密口令（可选） |
+| **服务身份标识** | `MCP_SSH_SERVER_NAME` | 字符串 | 自定义服务唯一命名空间（默认 `mcp-server-ssh`，非默认值触发工具描述前缀） |
+| **服务引导指示** | `MCP_SSH_SERVER_INSTRUCTIONS` | 多行文本 | 系统级服务角色与操作边界引导说明上下文（握手阶段下发给大模型） |
+| **连接超时时间** | `MCP_SSH_TIMEOUT` | 正整数毫秒 | 目标建连与握手超时时间（毫秒），默认 `30000` |
+| **心跳保活间隔** | `MCP_SSH_KEEP_ALIVE_INTERVAL` | 正整数毫秒 | KeepAlive 心跳间隔（毫秒），默认 `10000` |
+| **致命命令逃生** | `MCP_SSH_ALLOW_DANGEROUS_COMMANDS` | 严格布尔: `"true"` \| `"false"` | 是否放行全盘强删等致命破坏命令，默认 `false` 严格阻断 |
+| **安全审计开关** | `MCP_SSH_AUDIT_ENABLED` | 严格布尔: `"true"` \| `"false"` | 是否激活全景审计轨迹（配置 `MCP_SSH_AUDIT_LOG_PATH` 时自动开启） |
+| **审计日志路径** | `MCP_SSH_AUDIT_LOG_PATH` | 文件路径 | 审计日志物理落盘路径（缺省时输出至 stderr） |
+| **审计切分大小** | `MCP_SSH_AUDIT_MAX_SIZE_MB` | 正整数 MB | 单日志文件滚动轮转阈值（MB），默认 `10` |
+| **审计保留份数** | `MCP_SSH_AUDIT_MAX_FILES` | 正整数 | 历史切分备份文件保留份数上限，默认 `5` |
+| **审计熔断模式** | `MCP_SSH_AUDIT_STRICT` | 严格布尔: `"true"` \| `"false"` | 是否启用审计失败严格熔断（默认 `false` 柔性降级） |
 
-> 📌 **解析优先级规则**：`MCP_SSH_* (官方标准前缀，最高)` > `SSH_* (向下兼容前缀)` > `系统内置默认推导`。本地执行时会自动探测读取同级目录下的 `.env` 文件。
+> 📌 **严格配置准则 (Strict Configuration Guard)**：
+> 1. **单命名空间锁定**：服务 100% 仅读取 `MCP_SSH_*` 规范变量，不再支持无前缀或废弃前缀变量，杜绝环境变量多源歧义；
+> 2. **布尔严格解析**：所有布尔类型变量仅接受 `"true"` 或 `"false"`（不区分大小写与空白字符），输入 `"1"`、`"yes"`、`"on"` 等非标值将立即报错阻断启动；
+> 3. **ProxyJump 与端口转发解耦**：`MCP_SSH_PROXY_*` 仅专用于通过中继堡垒机建立 SSH 物理连接；会话期间的本地/远程/SOCKS5 隧道统一由运行时工具 `ssh_forward_port` 管控。
 
 ---
 
@@ -207,11 +222,15 @@
 {
   "mcpServers": {
     "ssh-remote": {
-      "url": "http://192.168.1.100:8000/sse"
+      "url": "http://192.168.1.100:8000/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_GENERATED_SECRET_TOKEN"
+      }
     }
   }
 }
 ```
+> 💡 **鉴权方式**：支持通过 HTTP 请求头 `Authorization: Bearer <token>` 认证，亦兼容浏览器原生 EventSource 客户端通过 URL 查询参数 `?token=<token>` 接入。
 
 ### 服务端点矩阵与健康检查探针
 
@@ -219,17 +238,17 @@
 
 | 端点路由 | HTTP 方法 | 功能说明 | 响应格式 / 状态 |
 | :--- | :--- | :--- | :--- |
-| `/sse` | `GET` | 建立长轮询 Server-Sent Events 事件流，协商客户端 Session | `text/event-stream` |
-| `/message` | `POST` | 客户端发送 JSON-RPC 消息请求（需携带 `?sessionId=...`） | `application/json` (202 Accepted) |
-| `/health` | `GET` | 服务就绪与存活探针（支持 Docker/K8s 容器健康检查） | `application/json` (200 OK) |
+| `/sse` | `GET` | 建立长轮询 Server-Sent Events 事件流，协商客户端 Session（需 Token 认证） | `text/event-stream` (200) |
+| `/message` | `POST` | 客户端发送 JSON-RPC 消息请求（需携带 `?sessionId=...` 与 Token 认证） | `application/json` (202 Accepted) |
+| `/health` | `GET` | 服务就绪与存活探针（免密探针，已安全脱敏，支持 Docker/K8s 健康探测） | `application/json` (200 OK) |
+| `/ping` | `GET` | 极简存活探测端点（免密探针，等同于 `/health`） | `application/json` (200 OK) |
+
+> 🔒 **安全收敛说明**：根路径 `/` 已彻底移除公开免密访问，未授权请求将直接响应 404 Not Found；健康探针已剔除内部版本与活跃连接数等指纹信息。
 
 探针请求回显范例：
 ```json
 {
-  "status": "ok",
-  "service": "mcp-server-ssh",
-  "version": "1.2.4",
-  "timestamp": "2026-10-04T02:00:00.000Z"
+  "status": "healthy"
 }
 ```
 
@@ -264,10 +283,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 启用 SSE 协议常驻服务
+      # 启用 SSE 协议常驻服务 (非回环绑定必须提供强身份令牌)
       - MCP_SSH_TRANSPORT=sse
       - MCP_SSH_SERVER_HOST=0.0.0.0
       - MCP_SSH_SERVER_PORT=8000
+      - MCP_SSH_AUTH_TOKEN=${MCP_SSH_AUTH_TOKEN:-change_me_to_your_secure_random_token}
 
       # 默认目标服务器凭据 (纯环境变量注入，免文件挂载)
       - MCP_SSH_HOST=192.168.1.100
@@ -286,15 +306,17 @@ services:
 亦可直接使用标准 `docker run` 命令启动（支持 `linux/amd64` 与 `linux/arm64` 双架构）：
 
 ```bash
-# 方式 A：SSE 远程常驻模式 (后台守护 + 端口映射 + 纯环境变量)
+# 方式 A：SSE 远程常驻模式 (后台守护 + 端口映射 + 强鉴权令牌)
 docker run -d \
   --name mcp-server-ssh \
   -p 8000:8000 \
   -e MCP_SSH_TRANSPORT=sse \
+  -e MCP_SSH_SERVER_HOST=0.0.0.0 \
+  -e MCP_SSH_AUTH_TOKEN="your_secure_generated_token" \
   -e MCP_SSH_HOST=192.168.1.100 \
   -e MCP_SSH_USER=root \
   -e MCP_SSH_PASSWORD=your_password \
-  ghcr.io/atengk/mcp-server-ssh:1.2.3
+  ghcr.io/atengk/mcp-server-ssh:latest
 
 # 方式 B：本地 stdio 单次管道模式 (宿主机无需安装 Node.js)
 # 客户端直接将 docker run 作为 command 执行，stdio 直接管道透传
@@ -360,7 +382,7 @@ docker run -i --rm \
         "MCP_SSH_HOST": "10.0.1.100",
         "MCP_SSH_PORT": "22",
         "MCP_SSH_USER": "ops",
-        "MCP_SSH_KEY_PATH": "D:/keys/prod_id_ed25519"
+        "MCP_SSH_PRIVATE_KEY_PATH": "D:/keys/prod_id_ed25519"
       }
     },
     "ssh-dev": {
@@ -566,7 +588,7 @@ docker run -i --rm \
 
 为了防范 AI 模型幻觉引发毁灭性系统灾难，服务内置了强力前置守卫：
 - **实时拦截黑名单**：自动阻断系统全盘强删（`rm -rf /`、`rm -rf /*`）、块设备覆写（`mkfs`、`dd if=... of=/dev/...`）、系统停机关机（`reboot`、`shutdown`、`init 0`）、清空根权限（`chmod -R 000 /`）及 Fork 炸弹等。
-- **运维受控逃生门**：针对系统管理员确需执行重启等特殊运维任务的场景，服务提供双重授权逃生门机制——必须在服务端配置环境变量 `SSH_ALLOW_DANGEROUS_COMMANDS=true`，且在 `ssh_exec` 调用时显式传入 `dangerouslySkipSafetyCheck: true` 方可放行，单方面调用将被严格拒绝。
+- **运维受控逃生门**：针对系统管理员确需执行重启等特殊运维任务的场景，服务提供双重授权逃生门机制——必须在服务端配置环境变量 `MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true`，且在 `ssh_exec` 调用时显式传入 `dangerouslySkipSafetyCheck: true` 方可放行，单方面调用将被严格拒绝。
 - **实机绝对安全**：拦截发生在客户端下发前，**危险字节流绝对不会走出本地网络，远端物理通道零受影响**。
 - **安全演练模式 (`dryRun`)**：在调用 `ssh_exec` 时传入 `dryRun: true`，可在不下发执行的前提下验证命令是否符合安全规则。
 

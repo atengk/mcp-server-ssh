@@ -44,18 +44,26 @@ mcp-server-ssh v${SERVICE_VERSION}
   MCP_SSH_SERVER_NAME           自定义服务唯一标识名 (默认: "mcp-server-ssh")
   MCP_SSH_SERVER_INSTRUCTIONS   大模型系统级引导提示指示说明上下文
   MCP_SSH_TRANSPORT             传输承载模式: "stdio" | "sse" (默认: "stdio")
-  MCP_SSH_SERVER_HOST           SSE 模式下的监听地址 (默认: "0.0.0.0")
+  MCP_SSH_SERVER_HOST           SSE 模式下的监听地址 (默认: "127.0.0.1"，非回环强制要求配置 Token)
   MCP_SSH_SERVER_PORT           SSE 模式下的监听端口 (默认: 8000)
+  MCP_SSH_AUTH_TOKEN            SSE 传输模式强身份鉴权令牌 (Bearer/Query 认证，防范未授权访问)
+  MCP_SSH_ALLOWED_ORIGINS       CORS 跨域请求来源 Origin 白名单 (逗号分隔，废除通配符 *)
+  MCP_SSH_ALLOWED_TARGETS       出站目标与跳板机白名单列表 (支持 IP、CIDR 网段、域名通配符及端口约束)
+  MCP_SSH_DISABLE_DYNAMIC_CONNECT 严格布尔值 ("true" | "false")，是否彻底禁用动态 ssh_connect 建连
+  MCP_SSH_PROXY_HOST            ProxyJump 堡垒机/跳板机穿透主机名或 IP
+  MCP_SSH_PROXY_PORT            ProxyJump 跳板机 SSH 端口 (默认: 22)
+  MCP_SSH_PROXY_USER            ProxyJump 跳板机认证用户名
+  MCP_SSH_PROXY_PASSWORD        ProxyJump 跳板机认证密码
+  MCP_SSH_PROXY_PRIVATE_KEY_BASE64 ProxyJump 跳板机专用私钥 (Base64 编码)
+  MCP_SSH_PROXY_KEY_PASSPHRASE  ProxyJump 跳板机私钥解密口令
   MCP_SSH_TIMEOUT               连接就绪超时毫秒数 (默认: 30000)
   MCP_SSH_KEEP_ALIVE_INTERVAL   心跳保活探测间隔毫秒数 (默认: 10000)
-  MCP_SSH_ALLOW_DANGEROUS_COMMANDS 严格布尔值 ("true" | "false")，是否放行危险命令
+  MCP_SSH_ALLOW_DANGEROUS_COMMANDS 严格布尔值 ("true" | "false")，是否放行危险命令 (默认: false)
   MCP_SSH_AUDIT_ENABLED         是否启用安全审计 ("true" | "false"，配置路径时自动推导)
   MCP_SSH_AUDIT_LOG_PATH        审计日志物理存储文件路径 (留空时输出至 stderr)
   MCP_SSH_AUDIT_MAX_SIZE_MB     单日志文件轮转大小上限 MB (默认: 10)
   MCP_SSH_AUDIT_MAX_FILES       保留的历史切分备份文件数量 (默认: 5)
   MCP_SSH_AUDIT_STRICT          是否启用严格审计熔断 ("true" | "false"，默认: false 柔性降级)
-
-
 
 内置 MCP 工具能力矩阵 (共 29 项原子工具):
   - 核心执行: ssh_exec (无状态执行与 Sudo 提权), ssh_ping (网络心跳与延迟探测)
