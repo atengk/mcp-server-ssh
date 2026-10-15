@@ -69,7 +69,7 @@
 
 ---
 
-## ⚙️ 5 大连接场景配置矩阵 (Scenarios)
+## ⚙️ 6 大连接场景配置矩阵 (Scenarios)
 
 针对不同网络拓扑与鉴权需求，提供开箱即用的配置范例：
 
@@ -166,6 +166,48 @@
 ```
 > 💡 **空载按需连接模式**：若启动时不提供任何预建连环境变量，服务将以空载状态启动，AI 智能体将在会话中通过 `ssh_connect` 按需连接主机。若设置了 `MCP_SSH_ALLOWED_TARGETS`，所有连接将受目标白名单强约束；设置 `MCP_SSH_DISABLE_DYNAMIC_CONNECT=true` 则彻底关闭动态建连。
 
+### 场景 6：预建连 + 启动即用内网端口映射 / SOCKS5 代理隧道 (开机即穿透)
+在启动 MCP 服务完成 SSH 鉴权的同时，自动在宿主机本地拉起端口转发或动态代理，生命周期与 SSH 服务同步保持常驻（默认 `MCP_SSH_TUNNEL_IDLE_TIMEOUT=0` 常驻不熔断）：
+
+#### 选项 A：启动时自动映射私网数据库（如本地 `16379` 映射至远端私网 Redis `10.0.1.200:6379`）
+```json
+{
+  "mcpServers": {
+    "ssh": {
+      "command": "npx",
+      "args": ["-y", "@atengk/mcp-server-ssh"],
+      "env": {
+        "MCP_SSH_HOST": "192.168.1.100",
+        "MCP_SSH_USER": "root",
+        "MCP_SSH_PRIVATE_KEY_PATH": "D:/files/server/id_ed25519",
+        "MCP_SSH_TUNNEL_TYPE": "local",
+        "MCP_SSH_TUNNEL_LOCAL_PORT": "16379",
+        "MCP_SSH_TUNNEL_REMOTE_HOST": "10.0.1.200",
+        "MCP_SSH_TUNNEL_REMOTE_PORT": "6379"
+      }
+    }
+  }
+}
+```
+
+#### 选项 B：启动时一键拉起本地动态 SOCKS5 代理（全内网集群动态穿透）
+本地客户端（如浏览器 SwitchyOmega、DBeaver、Terminal）配置代理 `socks5://127.0.0.1:1080`，即可直接访问远端机房所在的整个私有集群：
+```json
+{
+  "mcpServers": {
+    "ssh": {
+      "command": "npx",
+      "args": ["-y", "@atengk/mcp-server-ssh"],
+      "env": {
+        "MCP_SSH_CONFIG_ALIAS": "my-cloud-vps",
+        "MCP_SSH_TUNNEL_TYPE": "socks5",
+        "MCP_SSH_TUNNEL_LOCAL_PORT": "1080"
+      }
+    }
+  }
+}
+```
+
 ---
 
 ## 🌐 环境变量完整速查矩阵 (12-Factor App)
@@ -196,6 +238,12 @@
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_PASSWORD` | 敏感字符串 | ProxyJump 跳板机认证密码（可选） |
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_PRIVATE_KEY_BASE64` | Base64 编码字符串 | ProxyJump 跳板机专用私钥（可选） |
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_KEY_PASSPHRASE` | 敏感字符串 | ProxyJump 跳板机私钥解密口令（可选） |
+| **预建隧道模式** | `MCP_SSH_TUNNEL_TYPE` | 枚举: `"local"` \| `"remote"` \| `"socks5"` | 启动时预建隧道类型（默认 `"local"`，支持本地正向、远程反向与动态 SOCKS5 代理） |
+| **预建本地端口** | `MCP_SSH_TUNNEL_LOCAL_PORT` | 整数: `0` ~ `65535` | 宿主机本地监听端口（传 `0` 自动随机分配空闲端口；`socks5` 模式默认 `1080`） |
+| **预建目标主机** | `MCP_SSH_TUNNEL_REMOTE_HOST` | 主机名 / IP 地址 | 远端目标内网服务地址，默认 `127.0.0.1` |
+| **预建目标端口** | `MCP_SSH_TUNNEL_REMOTE_PORT` | 整数: `1` ~ `65535` | 远端目标服务端口（`local`/`remote` 模式必填；`socks5` 动态代理无需配置） |
+| **预建本地网卡** | `MCP_SSH_TUNNEL_LOCAL_HOST` | 主机名 / IP 地址 | 宿主机本地监听网卡地址，默认 `127.0.0.1`（安全回环） |
+| **预建空闲熔断** | `MCP_SSH_TUNNEL_IDLE_TIMEOUT` | 非负整数秒 | 预建隧道空闲超时自动关闭秒数，默认 `0`（常驻不超时，伴随 MCP 物理连接生命周期） |
 | **服务身份标识** | `MCP_SSH_SERVER_NAME` | 字符串 | 自定义服务唯一命名空间（默认 `mcp-server-ssh`，非默认值触发工具描述前缀） |
 | **服务引导指示** | `MCP_SSH_SERVER_INSTRUCTIONS` | 多行文本 | 系统级服务角色与操作边界引导说明上下文（握手阶段下发给大模型） |
 | **连接超时时间** | `MCP_SSH_TIMEOUT` | 正整数毫秒 | 目标建连与握手超时时间（毫秒），默认 `30000` |
@@ -207,10 +255,12 @@
 | **审计保留份数** | `MCP_SSH_AUDIT_MAX_FILES` | 正整数 | 历史切分备份文件保留份数上限，默认 `5` |
 | **审计熔断模式** | `MCP_SSH_AUDIT_STRICT` | 严格布尔: `"true"` \| `"false"` | 是否启用审计失败严格熔断（默认 `false` 柔性降级） |
 
-> 📌 **严格配置准则 (Strict Configuration Guard)**：
+> 📌 **严格配置准则与架构约束 (Strict Configuration Guard & Architecture Invariants)**：
 > 1. **单命名空间锁定**：服务 100% 仅读取 `MCP_SSH_*` 规范变量，不再支持无前缀或废弃前缀变量，杜绝环境变量多源歧义；
 > 2. **布尔严格解析**：所有布尔类型变量仅接受 `"true"` 或 `"false"`（不区分大小写与空白字符），输入 `"1"`、`"yes"`、`"on"` 等非标值将立即报错阻断启动；
-> 3. **ProxyJump 与端口转发解耦**：`MCP_SSH_PROXY_*` 仅专用于通过中继堡垒机建立 SSH 物理连接；会话期间的本地/远程/SOCKS5 隧道统一由运行时工具 `ssh_forward_port` 管控。
+> 3. **跳板机（ProxyJump）与端口转发隧道（Tunnel）概念与生命周期严格隔离**：
+>    - **跳板机 (Jump Host)**：属于**物理基础设施层与拓扑路由**，专用于穿透公私网边界中继建立底层 SSH 物理网络链路（通过 `MCP_SSH_PROXY_*` 规范环境变量或本地 `~/.ssh/config` 静态预置，服务启动建连期即生效）；
+>    - **端口转发隧道 (Port Forwarding & SOCKS5)**：属于**微服务级数据转发链路**，既支持通过 `MCP_SSH_TUNNEL_*` 在服务启动完成 SSH 鉴权后自动预建常驻隧道（开机即穿透，默认不超时），也支持在会话期间通过 `ssh_forward_port` / `ssh_tunnel_list` / `ssh_tunnel_close` 由大模型按需动态创建与安全回收（默认 300 秒空闲熔断防护）。
 
 ---
 
@@ -503,15 +553,47 @@ docker run -i --rm \
 > ```
 > 🛠️ **底层工具链**：`ssh_job_start` (脱机后台托管) + `ssh_job_status` + `ssh_job_logs`
 
-#### 🎯 场景 5：本地跨网络穿透与数据库代理隧道 (Tunnel & SOCKS5)
+#### 🎯 场景 5：网络穿透与受管端口转发隧道 (三位一体 Tunnel & SOCKS5)
+
+##### 5.1 本地正向端口映射 (Local Forwarding, `-L`)：访问私网数据库或微服务
 > **Prompt 复制即用**：
 > ```text
-> 我在本地电脑上需要临时访问目标服务器私网内的 Redis 服务（远端私网 IP 10.0.1.200:6379）：
-> 1. 帮我建立一条本地端口转发隧道，将我本机的 16379 映射到远端的 10.0.1.200:6379；
-> 2. 设置空闲超时熔断时间为 30 分钟（无连接自动回收，防止资源泄露）；
-> 3. 打印隧道建立结果与连接串，并在我联调完成后列出隧道清单以便确认。
+> 我在本地开发机上需要临时连接目标服务器私网内的 Redis 服务（远端内网 10.0.1.200:6379）：
+> 1. 调用 ssh_forward_port 建立本地端口转发隧道（type: "local"），将我本机的 16379 端口映射至 10.0.1.200:6379；
+> 2. 设置 idleTimeoutSeconds 为 1800 秒（30 分钟无流量自动关闭释放端口，防止忘记关闭导致资源泄露）；
+> 3. 建立成功后打印本地监听地址与连接参数，方便我直接用本地 RedisInsight 工具连接。
 > ```
-> 🛠️ **底层工具链**：`ssh_forward_port` (模式: local) + `ssh_tunnel_list` + `ssh_tunnel_close`
+> 🛠️ **底层工具链**：`ssh_forward_port` (`type: "local"`, `localPort: 16379`, `remoteHost: "10.0.1.200"`, `remotePort: 6379`)
+
+##### 5.2 远程反向端口穿透 (Remote Forwarding, `-R`)：将本地开发接口暴露给远端测试
+> **Prompt 复制即用**：
+> ```text
+> 我本地 3000 端口正在调试一个 Webhook 回调接口，需要远端服务器上的测试程序调用它：
+> 1. 调用 ssh_forward_port 建立远程反向端口转发（type: "remote"），将远端服务器的 8080 端口映射回我本地 127.0.0.1:3000；
+> 2. 设置 idleTimeoutSeconds 为 600 秒（10 分钟自动回收）；
+> 3. 建立成功后，帮我在远端执行 curl -I http://127.0.0.1:8080 测试是否能够顺利请求到我本地的 Webhook 服务。
+> ```
+> 🛠️ **底层工具链**：`ssh_forward_port` (`type: "remote"`, `remotePort: 8080`, `localPort: 3000`) + `ssh_exec` (curl 验证)
+
+##### 5.3 动态 SOCKS5 全局代理 (Dynamic SOCKS5, `-D`)：透明穿透整个内网私有集群
+> **Prompt 复制即用**：
+> ```text
+> 我需要临时排查远端机房私有子网内的多个 Web 站点与内部 API 节点：
+> 1. 调用 ssh_forward_port 启动纯 JS RFC 1928 动态 SOCKS5 代理服务（type: "socks5"），在本地 1080 端口监听；
+> 2. 设置空闲超时为 3600 秒（1 小时）；
+> 3. 启动完成后告知我代理协议地址（socks5://127.0.0.1:1080）与浏览器配置指引，以便我一键畅游内网集群。
+> ```
+> 🛠️ **底层工具链**：`ssh_forward_port` (`type: "socks5"`, `localPort: 1080`, 自动动态解析目标端口)
+
+##### 5.4 活跃隧道巡检、流量审计与主动关闭释放
+> **Prompt 复制即用**：
+> ```text
+> 联调测试已结束，请帮我清理与审计隧道资源：
+> 1. 调用 ssh_tunnel_list 列出当前所有活跃的端口转发与代理隧道；
+> 2. 检查各隧道的建立时间、当前活跃连接数（activeSockets）以及累计传输字节数（bytesTransferred）；
+> 3. 针对已经不再使用的隧道，调用 ssh_tunnel_close 输入 tunnelId 进行主动优雅关闭，确保本地和远端监听端口被干净释放。
+> ```
+> 🛠️ **底层工具链**：`ssh_tunnel_list` + `ssh_tunnel_close` (`tunnelId`)
 
 #### 🎯 场景 6：特权命令安全提权执行 (Sudo)
 > **Prompt 复制即用**：
@@ -573,8 +655,8 @@ docker run -i --rm \
 | **流式与差异 (3)**| `sftp_upload_dir` | **[纯 JS 流式 Tar]** 目录极速打包上传，支持正则与 .gitignore 排除 | `localPath`, `remotePath`, `excludePatterns?`, `useGitignore?` |
 | | `sftp_download_dir` | **[纯 JS 流式 Tar]** 远程目录极速打包下载至本地 | `remotePath`, `localPath`, `excludePatterns?` |
 | | `sftp_patch_file` | **[原子差异补丁]** 基于目标块锚点唯一性校验的局部精准热修 | `remotePath`, `targetContent`, `replacementContent`, `allowMultiple?` |
-| **端口转发 (3)** | `ssh_forward_port` | **[三位一体]** 管控 local/remote 端口映射及动态 SOCKS5 代理 | `mode` ("local"\|"remote"\|"socks5"), `localPort`, `remoteHost?`, `remotePort?`, `idleTimeoutSeconds?` |
-| | `ssh_tunnel_list` | 列出当前所有活跃隧道、端口映射、转发模式与流量统计 | `connectionId?` |
+| **端口转发 (3)** | `ssh_forward_port` | **[三位一体]** 管控 local/remote 端口映射及动态 SOCKS5 代理 | `type?` ("local"\|"remote"\|"socks5"), `localHost?`, `localPort?`, `remoteHost?`, `remotePort?`, `idleTimeoutSeconds?`, `connectionId?` |
+| | `ssh_tunnel_list` | 列出当前所有活跃隧道、端口映射、转发模式与流量统计 | *(无参数)* |
 | | `ssh_tunnel_close` | 手动关闭指定的端口转发隧道或代理服务 | `tunnelId` |
 | **后台作业 (5)** | `ssh_job_start` | **[脱机作业]** 在远程后台异步启动长耗时命令（记录 PID 与状态） | `command`, `jobId?`, `cwd?` |
 | | `ssh_job_status` | 检查后台作业的活跃进程状态、运行耗时与最终退出码 | `jobId` |
@@ -628,6 +710,77 @@ docker run -i --rm \
 直接在宿主机终端中运行内置的四维自检套件：<br>
 <code>npx @atengk/mcp-server-ssh --doctor</code><br>
 它将在数秒内对 Node.js 运行时、本地 <code>~/.ssh/</code> 资产与密钥、环境变量规范合规性（含安全审计目录权限与服务标识）以及目标主机 SSH 握手进行全景只读体检，并给出精准排障指引。
+</details>
+
+<details>
+<summary><b>Q6: 三位一体网络隧道治理机制（Local / Remote / SOCKS5）与跳板机（ProxyJump）有何本质区别？如何使用？</b></summary>
+<br>
+
+很多开发者容易将 **跳板机（Jump Host / ProxyJump）** 与 **端口转发隧道（Tunnel）** 混为一谈。在领域架构设计上，两者属于完全不同的网络层级：
+
+| 核心维度 | 跳板机 (Jump Host / ProxyJump) | 端口转发隧道 (SSH Tunnel & SOCKS5) |
+| :--- | :--- | :--- |
+| **层级与角色** | **物理网络拓扑层**：穿透公网与隔离私网边界，作为中继节点中转 SSH 底层物理连接 | **会话级微服务转发层**：在已鉴权的物理连接内部开辟数据多路复用隧道，穿透访问内网特定服务 |
+| **配置形式** | **静态预置**：通过 12-Factor 环境变量（`MCP_SSH_PROXY_*`）或本地 `~/.ssh/config` 声明 | **运行时动态编排**：通过运行时工具 `ssh_forward_port` 按需拉起，无静态环境变量 |
+| **生命周期** | 服务初始化启动时预建连，生命周期伴随服务主进程 | 会话期间按需创建，支持 300 秒空闲自动熔断，物理连接断开时级联释放 |
+| **管控工具** | `ssh_connect` (入参 `proxyJump`) | `ssh_forward_port` / `ssh_tunnel_list` / `ssh_tunnel_close` |
+
+---
+
+#### 🔌 三位一体端口转发模式详解 (`ssh_forward_port`)
+
+通过原子工具 `ssh_forward_port`，可一键拉起以下三种模式之一：
+
+##### 1. 本地正向端口转发 (Local Forwarding, `-L`)
+- **工作原理**：在宿主机本地监听端口，将进入该端口的 TCP 流量经由 SSH 链路转发至远端内网服务。
+- **典型入参**：
+  ```json
+  {
+    "type": "local",
+    "localHost": "127.0.0.1",
+    "localPort": 16379,
+    "remoteHost": "10.0.1.200",
+    "remotePort": 6379,
+    "idleTimeoutSeconds": 1800
+  }
+  ```
+- **适用场景**：本地开发调试时，临时直接用本地 GUI 工具连接目标主机内网的私有 Redis、MySQL 或内部微服务。
+
+##### 2. 远程反向端口转发 (Remote Forwarding, `-R`)
+- **工作原理**：在远程服务器上开启监听端口，将远端服务器接收到的访问流量反向经由 SSH 链路转发回宿主机本地。
+- **典型入参**：
+  ```json
+  {
+    "type": "remote",
+    "remotePort": 8080,
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "idleTimeoutSeconds": 600
+  }
+  ```
+- **适用场景**：将本地正在开发的临时 Webhook 服务或微服务接口暴露给远端测试环境调用。
+
+##### 3. 动态 SOCKS5 代理 (Dynamic Proxy, `-D`, RFC 1928)
+- **工作原理**：在宿主机本地开启高并发 SOCKS5 代理协议监听，**无需配置单一固定的远端目标**；宿主机任何支持 SOCKS5 代理的客户端发起的任意 TCP 连接均由远端服务器动态代理外发。
+- **典型入参**（`remotePort` 由协议动态协商解析，**无需填报**）：
+  ```json
+  {
+    "type": "socks5",
+    "localHost": "127.0.0.1",
+    "localPort": 1080,
+    "idleTimeoutSeconds": 3600
+  }
+  ```
+- **适用场景**：将本地浏览器、API 调试工具或终端配置代理 `socks5://127.0.0.1:1080`，即可透明畅游目标机所在的整个局域网集群。
+
+---
+
+#### 🛡️ 四大生命周期与安全防泄漏防护
+1. **默认回环绑定**：本地监听默认锁定 `127.0.0.1`，绝不对宿主机外网暴露；
+2. **零冲突端口自选**：`localPort` 传 `0` 或缺省时，系统底层自动分配合法的随机空闲端口并在返回值中明确告知实际分配的 `localPort`；
+3. **空闲超时自动熔断**：默认 `idleTimeoutSeconds: 300`（可按需调整），在持续无流量传输时自动关闭 Server 并释放端口，杜绝无主监听常驻；
+4. **物理断连级联回收**：当底层关联的 SSH 物理连接断开或网络闪断时，隧道服务自动触发级联析构，100% 确保宿主机和远端端口被洁净释放；
+5. **实时状态与流量观测**：调用 `ssh_tunnel_list` 可一览所有活跃隧道的建立时间、最近活跃时间、当前并发客户端数（`activeSockets`）及传输总字节数（`bytesTransferred`）。
 </details>
 
 ---

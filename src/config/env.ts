@@ -7,9 +7,8 @@
  * @since 2026-10-04
  */
 
-import { z } from "zod";
 import type { ProxyJumpOptions, SSHConnectParams } from "../types/connection.js";
-import { isLoopbackHost } from "../server/sse-server.js";
+import { assertFailClosedBinding } from "../security/target-guard.js";
 
 /**
  * 通信传输协议枚举
@@ -73,6 +72,18 @@ export interface AuditConfig {
 
 
 /**
+ * 预建端口转发与 SOCKS5 代理隧道配置契约 (12-Factor App)
+ */
+export interface TunnelConfig {
+  type: "local" | "remote" | "socks5";
+  localPort: number;
+  remoteHost: string;
+  remotePort?: number;
+  localHost: string;
+  idleTimeoutSeconds: number;
+}
+
+/**
  * 应用全局集中配置契约
  */
 export interface AppConfig {
@@ -84,6 +95,7 @@ export interface AppConfig {
   allowDangerousCommands: boolean;
   target?: TargetHostConfig;
   proxyJump?: ProxyJumpConfig;
+  tunnel?: TunnelConfig;
   audit: AuditConfig;
   /**
    * 服务唯一名称标识 (默认: "mcp-server-ssh")
@@ -207,6 +219,35 @@ function parsePositiveInt(
   const parsed = Number.parseInt(value, 10);
   const subject = desc ? `${desc}必须为正整数` : "必须为正整数";
   if (Number.isNaN(parsed) || parsed <= 0) {
+    throw new Error(`[mcp-server-ssh] 配置解析错误: ${fieldName} ${subject}，收到 "${value}"`);
+  }
+
+  return parsed;
+}
+
+/**
+ * 校验并解析非负整数数值 (允许 0 或正整数)
+ *
+ * @param value 原始环境变量字符串
+ * @param defaultValue 默认数值
+ * @param fieldName 字段名称 (用于友好错误提示)
+ * @param desc 可选的数值业务语义说明
+ * @return 解析后的非负整数 (>= 0)
+ * @throws 当数值非法或小于 0 时抛出异常
+ */
+function parseNonNegativeInt(
+  value: string | undefined,
+  defaultValue: number,
+  fieldName: string,
+  desc?: string
+): number {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  const subject = desc ? `${desc}必须为非负整数 (>= 0)` : "必须为非负整数 (>= 0)";
+  if (Number.isNaN(parsed) || parsed < 0) {
     throw new Error(`[mcp-server-ssh] 配置解析错误: ${fieldName} ${subject}，收到 "${value}"`);
   }
 
@@ -373,10 +414,8 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const authToken = getEnvValue(env, "MCP_SSH_AUTH_TOKEN");
 
   // SSE 外部网络绑定强制熔断 (Fail-Closed) 校验
-  if (transport === "sse" && !isLoopbackHost(serverHost) && !authToken) {
-    throw new Error(
-      `[mcp-server-ssh] 安全熔断: 外部网络绑定 (${serverHost}) 必须配置 MCP_SSH_AUTH_TOKEN (Fail-Closed)`
-    );
+  if (transport === "sse") {
+    assertFailClosedBinding(serverHost, authToken);
   }
 
   // 8. 目标白名单与动态建连约束 (ADR-0017)
@@ -402,6 +441,68 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
         .filter((o) => o.length > 0)
     : undefined;
 
+  // 10. 预建端口转发与 SOCKS5 代理隧道配置解析 (12-Factor App)
+  const tunnelTypeRaw = getEnvValue(env, "MCP_SSH_TUNNEL_TYPE");
+  const tunnelLocalPortRaw = getEnvValue(env, "MCP_SSH_TUNNEL_LOCAL_PORT");
+  const tunnelRemoteHost = getEnvValue(env, "MCP_SSH_TUNNEL_REMOTE_HOST") || "127.0.0.1";
+  const tunnelRemotePortRaw = getEnvValue(env, "MCP_SSH_TUNNEL_REMOTE_PORT");
+  const tunnelLocalHost = getEnvValue(env, "MCP_SSH_TUNNEL_LOCAL_HOST") || "127.0.0.1";
+  const tunnelIdleTimeoutRaw = getEnvValue(env, "MCP_SSH_TUNNEL_IDLE_TIMEOUT");
+
+  let tunnel: TunnelConfig | undefined;
+  if (tunnelLocalPortRaw !== undefined || tunnelTypeRaw !== undefined || tunnelRemotePortRaw !== undefined) {
+    let type: "local" | "remote" | "socks5" = "local";
+    if (tunnelTypeRaw) {
+      const lower = tunnelTypeRaw.toLowerCase();
+      if (lower === "local" || lower === "remote" || lower === "socks5") {
+        type = lower;
+      } else {
+        throw new Error(
+          `[mcp-server-ssh] 配置解析错误: MCP_SSH_TUNNEL_TYPE 必须为 "local"、"remote" 或 "socks5"，收到无效输入 "${tunnelTypeRaw}"`
+        );
+      }
+    }
+
+    let localPort = 0;
+    if (tunnelLocalPortRaw !== undefined) {
+      const p = Number.parseInt(tunnelLocalPortRaw, 10);
+      if (Number.isNaN(p) || p < 0 || p > 65535) {
+        throw new Error(
+          `[mcp-server-ssh] 配置解析错误: MCP_SSH_TUNNEL_LOCAL_PORT 端口号超出有效范围 (0-65535)，收到 "${tunnelLocalPortRaw}"`
+        );
+      }
+      localPort = p;
+    } else if (type === "socks5") {
+      localPort = 1080;
+    }
+
+    const remotePort = tunnelRemotePortRaw
+      ? parsePort(tunnelRemotePortRaw, 0, "MCP_SSH_TUNNEL_REMOTE_PORT")
+      : undefined;
+
+    if (type !== "socks5" && !remotePort) {
+      throw new Error(
+        `[mcp-server-ssh] 配置解析错误: ${type} 模式端口转发必须配置有效的远程目标服务端口 (MCP_SSH_TUNNEL_REMOTE_PORT)`
+      );
+    }
+
+    const idleTimeoutSeconds = parseNonNegativeInt(
+      tunnelIdleTimeoutRaw,
+      0, // 预建隧道默认 0，表示常驻不超时
+      "MCP_SSH_TUNNEL_IDLE_TIMEOUT",
+      "空闲超时时间"
+    );
+
+    tunnel = {
+      type,
+      localPort,
+      remoteHost: tunnelRemoteHost,
+      remotePort,
+      localHost: tunnelLocalHost,
+      idleTimeoutSeconds,
+    };
+  }
+
   return {
     transport,
     serverHost,
@@ -411,6 +512,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     allowDangerousCommands,
     target,
     proxyJump,
+    tunnel,
     audit,
     serverName,
     serverInstructions,

@@ -628,6 +628,79 @@ Host test-alias
     await testClient.close();
     await protectedServer.close();
   });
+
+  it("当配置 disableDynamicConnect 时，使用合法 sshConfigAlias 应豁免放行并成功连接 (ADR-0017)", async () => {
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const protectedServer = createMCPServer({
+      connectionPool: pool,
+      configParser,
+      disableDynamicConnect: true,
+    });
+    const testClient = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      protectedServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    // 使用合法别名
+    const res = await testClient.callTool({
+      name: "ssh_connect",
+      arguments: { sshConfigAlias: "test-alias" },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const data = JSON.parse((res.content[0] as any).text);
+    expect(data.status).toBe("connected");
+
+    // 若使用未在 config 中定义的假别名且无 host -> 依然被拦截
+    const resFake = await testClient.callTool({
+      name: "ssh_connect",
+      arguments: { sshConfigAlias: "non-existent-alias" },
+    });
+    expect(resFake.isError).toBe(true);
+    expect((resFake.content[0] as any).text).toContain("动态建连已被管理员禁用");
+
+    await testClient.close();
+    await protectedServer.close();
+  });
+
+  it("应当支持通过 startServer 自动预建端口转发隧道 (12-Factor App)", async () => {
+    const configWithTunnel = {
+      transport: "stdio" as const,
+      serverHost: "127.0.0.1",
+      serverPort: 0,
+      timeoutMs: 30000,
+      keepAliveIntervalMs: 10000,
+      allowDangerousCommands: false,
+      target: {
+        host: "10.0.0.1",
+        port: 22,
+        username: "root",
+      },
+      tunnel: {
+        type: "local" as const,
+        localPort: 0,
+        remoteHost: "10.0.1.200",
+        remotePort: 6379,
+        localHost: "127.0.0.1",
+        idleTimeoutSeconds: 0,
+      },
+      audit: {
+        enabled: false,
+        maxSizeMb: 10,
+        maxFiles: 5,
+        strict: false,
+      },
+    };
+
+    const stop = await startServer(pool, configWithTunnel as any);
+    expect(typeof stop).toBe("function");
+    await stop();
+  });
 });
 
 

@@ -172,6 +172,8 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
   const envConfig = parseEnv();
   const serverName = options?.serverName ?? envConfig.serverName;
   const serverInstructions = options?.serverInstructions ?? envConfig.serverInstructions;
+  const allowedTargets = options?.allowedTargets ?? envConfig.allowedTargets;
+  const disableDynamicConnect = options?.disableDynamicConnect ?? envConfig.disableDynamicConnect;
 
   const server = new McpServer(
     {
@@ -244,21 +246,33 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
         // 目标白名单与禁用动态建连守卫校验 (ADR-0017)
         let targetHost = params.host;
         let targetPort = params.port ?? 22;
-        if (!targetHost && params.sshConfigAlias) {
+        let isConfigAlias = false;
+        let jumpHost = params.proxyJump;
+
+        if (params.sshConfigAlias) {
           const aliasConfig = configParser.resolveHost(params.sshConfigAlias);
-          if (aliasConfig && aliasConfig.host) {
-            targetHost = aliasConfig.host;
-            targetPort = aliasConfig.port ?? targetPort;
+          if (aliasConfig) {
+            isConfigAlias = true;
+            if (aliasConfig.host) {
+              targetHost = aliasConfig.host;
+            }
+            if (aliasConfig.port) {
+              targetPort = aliasConfig.port;
+            }
+            if (!jumpHost && aliasConfig.proxyJump) {
+              jumpHost = aliasConfig.proxyJump;
+            }
           }
         }
 
         validateConnectionTarget(
           targetHost || "",
           targetPort,
-          params.proxyJump,
+          jumpHost,
           {
-            allowedTargets: options?.allowedTargets,
-            disableDynamicConnect: options?.disableDynamicConnect,
+            allowedTargets,
+            disableDynamicConnect,
+            isConfigAlias,
           }
         );
 
@@ -1187,6 +1201,37 @@ async function autoConnectDefaultHost(pool: ConnectionPool, config: ReturnType<t
 }
 
 /**
+ * 依据应用配置自动预建立端口转发或 SOCKS5 代理隧道 (12-Factor App)
+ */
+async function autoOpenDefaultTunnel(tunnelService: TunnelService, config: ReturnType<typeof parseEnv>): Promise<void> {
+  if (!config.tunnel) {
+    return;
+  }
+
+  const t = config.tunnel;
+  try {
+    process.stderr.write(
+      `[mcp-server-ssh] 检测到预建隧道配置，正在启动 ${t.type} 隧道 (${t.localHost}:${t.localPort} -> ${t.remoteHost}:${t.remotePort ?? "*"})...\n`
+    );
+    const info = await tunnelService.openTunnel({
+      type: t.type,
+      localHost: t.localHost,
+      localPort: t.localPort,
+      remoteHost: t.remoteHost,
+      remotePort: t.remotePort,
+      idleTimeoutSeconds: t.idleTimeoutSeconds,
+    });
+    process.stderr.write(
+      `[mcp-server-ssh] 预建端口转发隧道已就绪: [${info.tunnelId}] ${info.type} 模式监听本地 ${info.localHost}:${info.localPort}\n`
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[mcp-server-ssh] 预建端口转发隧道启动失败: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+  }
+}
+
+/**
  * 启动 MCP 服务通信传输并监听请求 (支持 stdio 与 sse 双模)
  *
  * @param customPool 可选注入的底层连接池实例
@@ -1222,6 +1267,9 @@ export async function startServer(
   // 1. 依据环境变量自动预建立默认主机连接
   await autoConnectDefaultHost(pool, config);
 
+  // 2. 依据环境变量自动预建立端口转发隧道 (12-Factor App)
+  await autoOpenDefaultTunnel(tunnelService, config);
+
   let sseInstance: RunningSSEServer | undefined;
   let isShuttingDown = false;
 
@@ -1246,7 +1294,7 @@ export async function startServer(
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
-  // 2. 根据传输模式路由分发
+  // 3. 根据传输模式路由分发
   if (config.transport === "sse") {
     process.stderr.write(
       `[mcp-server-ssh] 服务正在通过 SSE HTTP 模式启动 (${config.serverHost}:${config.serverPort})...\n`
@@ -1256,6 +1304,7 @@ export async function startServer(
         createMCPServer({
           connectionPool: pool,
           configParser,
+          tunnelService,
           auditService,
           serverName,
           serverInstructions,

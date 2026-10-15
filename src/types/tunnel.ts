@@ -34,9 +34,9 @@ export const SSHForwardPortParamsSchema = z.object({
   idleTimeoutSeconds: z
     .number()
     .int()
-    .positive()
+    .nonnegative()
     .default(300)
-    .describe("空闲自动超时释放时间（秒），默认 300 秒无流量自动关闭隧道以防泄漏"),
+    .describe("空闲自动超时释放时间（秒），默认 300 秒无流量自动关闭隧道以防泄漏；传 0 表示长驻不超时"),
   connectionId: z.string().optional().describe("使用的 SSH 物理连接标识符，缺省时使用当前默认连接"),
 });
 

@@ -23,8 +23,8 @@ _Avoid_: Connection (连接), Channel (通道), Terminal Window (终端窗口)
 _Avoid_: Thread (线程), Process (进程), Pipe (管道)
 
 **Jump Host (跳板机 / 堡垒机)**:
-处于网络边界、用于建立中继隧道以代理转发访问内网目标主机的中间 SSH 服务器（ProxyJump）。
-_Avoid_: Gateway (网关), Proxy (通用代理), Router (路由器)
+处于网络边界、用于建立中继中转以代理转发底层物理网络连接（ProxyJump）的中间 SSH 服务器，属于物理基础设施拓扑概念；生命周期与物理连接建连同步。
+_Avoid_: Gateway (网关), Proxy (通用代理), Router (路由器), Tunnel (与会话级端口转发隧道混淆)
 
 ### 命令与安全防护 (Execution & Safety)
 
@@ -89,6 +89,10 @@ _Avoid_: Loose Converter (宽松转换器), Permissive Parser (宽容解析器),
 **Pre-connection (预连接)**:
 在 MCP 服务初始化启动阶段，依据规范环境变量（`MCP_SSH_*`）自动建立并指定为默认活跃通道的 SSH 物理连接机制。
 _Avoid_: Auto Connect (模糊的自动建连), Static Connection (静态连接)
+
+**Pre-configured Tunnel (预建隧道)**:
+在 MCP 服务初始化启动阶段，依据 12-Factor 规范环境变量（`MCP_SSH_TUNNEL_*`）伴随默认主机自动拉起并长驻运行的本地端口转发或 SOCKS5 代理隧道机制。
+_Avoid_: Static Tunnel (静态隧道), Dynamic Forwarding (混淆纯运行时动态转发)
 
 **Structured ProxyJump (结构化跳板机配置)**:
 将跳板机主机名、端口与专用鉴权凭据（独立用户、密码或私钥）封装为强类型对象的跳板机配置模式，以区别于非结构化的单行连接字符串。
@@ -155,8 +159,8 @@ _Avoid_: Host Scanner (主机扫描器), Endpoint Enum
 _Avoid_: File-by-file Copy (逐文件拷贝), SCP Recursive
 
 **SSH Tunnel (SSH 端口转发隧道)**:
-基于 SSH 协议直接建立的物理链路多路复用隧道，将宿主机本地端口通过目标主机转发至远程隔离内网端口（Local Forwarding）的机制。
-_Avoid_: VPN (虚拟专用网), Port Mapping (端口映射)
+在已建立鉴权的物理 SSH 连接内部按需动态开辟的数据多路复用通道，涵盖本地正向转发（-L）、远程反向转发（-R）与动态 SOCKS5 代理（-D），属于会话级微服务转发链路；具备空闲超时自动熔断与物理断连级联回收生命周期。
+_Avoid_: Jump Host (跳板机混淆), ProxyJump (跳板中继混淆), VPN (虚拟专用网), Port Mapping (非受管端口映射)
 
 **System Diagnostic Probe (系统巡检探针)**:
 通过无侵入式只读探针一次性采集目标 Linux 主机硬件架构、内核、负载、内存、磁盘与关键监听状态的轻量结构化体检服务。

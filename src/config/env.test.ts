@@ -432,6 +432,49 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       expect(config.serverInstructions).toBe("本实例专门用于生产跳板机，严禁执行重启操作");
     });
   });
+
+  describe("预建端口转发与 SOCKS5 代理隧道配置 (12-Factor App)", () => {
+    it("正确解析 local 模式预建隧道环境变量", () => {
+      const config = parseEnv({
+        MCP_SSH_HOST: "10.0.0.1",
+        MCP_SSH_TUNNEL_TYPE: "local",
+        MCP_SSH_TUNNEL_LOCAL_PORT: "16379",
+        MCP_SSH_TUNNEL_REMOTE_HOST: "10.0.1.200",
+        MCP_SSH_TUNNEL_REMOTE_PORT: "6379",
+        MCP_SSH_TUNNEL_IDLE_TIMEOUT: "0",
+      });
+
+      expect(config.tunnel).toBeDefined();
+      expect(config.tunnel?.type).toBe("local");
+      expect(config.tunnel?.localPort).toBe(16379);
+      expect(config.tunnel?.remoteHost).toBe("10.0.1.200");
+      expect(config.tunnel?.remotePort).toBe(6379);
+      expect(config.tunnel?.localHost).toBe("127.0.0.1");
+      expect(config.tunnel?.idleTimeoutSeconds).toBe(0);
+    });
+
+    it("正确解析 socks5 动态代理预建隧道环境变量 (默认端口 1080 且无需 remotePort)", () => {
+      const config = parseEnv({
+        MCP_SSH_HOST: "10.0.0.1",
+        MCP_SSH_TUNNEL_TYPE: "socks5",
+      });
+
+      expect(config.tunnel).toBeDefined();
+      expect(config.tunnel?.type).toBe("socks5");
+      expect(config.tunnel?.localPort).toBe(1080);
+      expect(config.tunnel?.remotePort).toBeUndefined();
+      expect(config.tunnel?.idleTimeoutSeconds).toBe(0);
+    });
+
+    it("local 模式未提供 remotePort 时必须抛出配置异常", () => {
+      expect(() =>
+        parseEnv({
+          MCP_SSH_HOST: "10.0.0.1",
+          MCP_SSH_TUNNEL_LOCAL_PORT: "16379",
+        })
+      ).toThrow(/必须配置有效的远程目标服务端口/);
+    });
+  });
 });
 
 
