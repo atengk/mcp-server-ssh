@@ -226,6 +226,15 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      - name: 安装依赖与构建产物
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm run build
+          if [ ! -f "dist/index.js" ]; then
+            echo "::error::编译核心产物 dist/index.js 不存在，阻断发布以防止空包！"
+            exit 1
+          fi
+
       - name: 同步版本号并发布至 npm
         if: vars.ENABLE_NPM_PUBLISH == 'true' || env.NODE_AUTH_TOKEN != ''
         run: |

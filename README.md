@@ -8,7 +8,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-1.x-orange.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/tests-210%2F210%20passing-brightgreen.svg?style=flat-square)](./src)
+[![Tests](https://img.shields.io/badge/tests-226%2F226%20passing-brightgreen.svg?style=flat-square)](./src)
 
 基于标准 **OpenSSH 协议** 深度连接与操控 Linux/Unix 系统的 **Model Context Protocol (MCP)** 服务。为大语言模型（LLM）和 AI 智能体（Claude Desktop、Cursor、Antigravity、Cline 等）提供安全、可控、零侵入的远程终端执行与 POSIX 文件系统管理基础设施。
 
@@ -66,6 +66,89 @@
 }
 ```
 > 🔒 **单一规范命名空间提示 (ADR-0012)**：服务严格仅识别 `MCP_SSH_*` 规范命名空间环境变量。布尔变量严格仅接受 `"true"` 或 `"false"`。请务必使用官方规范键名以确保配置生效。
+
+---
+
+## 🖥️ CLI 命令行工具与全景诊断套件 (CLI & Diagnostics)
+
+除了作为标准 MCP stdio/SSE 服务被大模型客户端唤起外，`@atengk/mcp-server-ssh` 还提供完整的现代化 CLI 命令行交互能力，同时原生支持 GNU 规范长短标志（`-h / --help`, `-v / --version`, `--doctor`）与 POSIX 风格位置子命令（`doctor`, `version`, `help`），版本号动态联动 `package.json` 保持单一真实信源（[ADR-0013](docs/adr/0013-cli-suite-and-health-doctor.md)）。
+
+### 1. 命令行语法与选项速查
+
+```bash
+# 基本调用语法
+$ mcp-server-ssh [选项]
+$ mcp-server-ssh <子命令>
+
+# 或通过 npx 零安装即时调用
+$ npx @atengk/mcp-server-ssh [选项 / 子命令]
+```
+
+| 命令形态 / 选项标志 | 等价子命令 (Subcommand) | 类型 | 说明与行为 |
+| :--- | :--- | :--- | :--- |
+| `-h`, `--help` | `help` | 布尔标志 | 打印包含全部 12-Factor 环境变量、29 项原子工具与快速上手范例的帮助手册并退出 |
+| `-v`, `--version` | `version` | 布尔标志 | 打印当前安装与运行的服务版本号（如 `v1.4.0`）并退出 |
+| `--doctor` | `doctor` | 布尔标志 | 启动四维全景自检排障套件，对运行时、密钥链、网络安全与目标连通性进行秒级诊断 |
+| `--server-name <name>` | *(无)* | 字符串参数 | 自定义当前服务实例的唯一命名空间标识（默认: `"mcp-server-ssh"`） |
+| `--server-instructions <text>` | *(无)* | 字符串参数 | 向大模型注入系统级服务角色引导指示说明（在协议握手阶段下发） |
+
+> 📌 **参数生效优先级准则 (Precedence Invariant)**：  
+> `CLI 命令行长选项 (--server-name / --server-instructions)` > `规范环境变量 (MCP_SSH_SERVER_NAME / MCP_SSH_SERVER_INSTRUCTIONS)` > `系统内置默认值`。
+
+---
+
+### 2. 🩺 四维全景排障自检套件 (`--doctor` / `doctor`)
+
+在客户端配置报错、无法建连或网络拓扑受阻时，无需繁琐查看堆栈或启动完整宿主客户端，直接运行 `doctor` 即可在 **纯只读、零副作用** 的前提下秒级扫描系统健康状况：
+
+```bash
+# 运行诊断 (标志与子命令完全等价)
+npx @atengk/mcp-server-ssh --doctor
+# 或
+npx @atengk/mcp-server-ssh doctor
+```
+
+#### 四维立体排查矩阵
+
+| 自检维度 | 诊断检查项与对应标准 | 状态判定与告警逻辑 |
+| :--- | :--- | :--- |
+| **1. Runtime 运行时** | **Node.js 主版本要求**<br>操作系统平台与 ABI | • `PASS`: Node.js >= 18.0.0<br>• `FAIL`: Node.js 版本过低，提示升级环境 |
+| **2. 本地 OpenSSH 资产** | **`~/.ssh/config` 配置文件**<br>**默认私钥链探测** (`id_ed25519` / `id_ecdsa` / `id_rsa`)<br>**SSH Agent 转发通道** (`SSH_AUTH_SOCK`) | • `PASS`: 探测到合法私钥、可读配置文件或活跃 Agent<br>• `WARN`: 缺失可选资产（不影响基于环境变量的账密或自定义私钥直连） |
+| **3. 环境变量与安全合规** | **规范环境变量强解析** ([ADR-0012](docs/adr/0012-strict-environment-variable-governance.md))<br>**安全审计落盘目录权限** ([ADR-0014](docs/adr/0014-audit-trail-and-security-compliance.md))<br>**服务身份与引导指示** ([ADR-0015](docs/adr/0015-multi-instance-server-identity-and-instructions.md))<br>**SSE 网络模式与非回环 Fail-Closed 熔断** ([ADR-0017](docs/adr/0017-sse-auth-binding-defense-and-surface-hardening.md))<br>**预建端口转发 / SOCKS5 代理隧道** (12-Factor App)<br>**目标主机白名单与动态建连约束** ([ADR-0017](docs/adr/0017-sse-auth-binding-defense-and-surface-hardening.md)) | • `PASS`: 配置合规且约束健全<br>• `WARN`: 本地开发模式下未启用审计或仅绑定回环免密<br>• `FAIL`: 非回环外部网络绑定未配置 Token 触发安全熔断阻断、审计目录不可写或环境变量格式非法 |
+| **4. 目标连通性只读探测** | **TCP 端口可达性探测**<br>**SSH 协议握手与公私钥/账密鉴权** | • `PASS`: 目标主机 22 端口连通且鉴权通过<br>• `WARN`: 未配置默认目标（按需空载动态建连模式）<br>• `FAIL`: 网络超时或凭证鉴权被远端服务器拒绝 |
+
+#### CI/CD 与容器健康门禁退出码约束 (Exit Code Contract)
+
+`doctor` 命令严格遵循标准退出码规范，可无缝接入 CI/CD 流水线与 Docker 容器启动探针：
+- **退出码 `0`**：全部检查项通过（允许包含非致命的 `WARN` 提示）；
+- **退出码 `1`**：存在至少 1 项阻断性严重缺陷（`FAIL`，如 Node 版本不满足、外部暴露缺少 Token 熔断、配置非法或 SSH 鉴权失败）。
+
+#### 终端诊断输出范例
+
+```text
+=================================================
+   mcp-server-ssh 全景自检排障套件 (Doctor)     
+=================================================
+
+[Runtime 运行时]
+  [PASS] Node.js 版本: Node.js v22.19.0 满足环境要求 (>= 18.0.0)
+  [PASS] 操作系统平台: Linux (linux x64), Node ABI: 127
+[本地 OpenSSH 资产]
+  [PASS] SSH 配置文件: ~/.ssh/config 文件存在且具备可读权限
+  [PASS] 默认本地私钥: 在 ~/.ssh/ 探测到本地默认私钥: id_ed25519
+  [PASS] SSH Agent 转发通道: SSH_AUTH_SOCK 处于活跃挂载状态
+[环境变量配置]
+  [PASS] 规范配置解析 (ADR-0012): 环境变量解析强校验通过 (传输模式: stdio, 超时: 30000ms)
+  [PASS] 安全审计轨迹 (ADR-0014): 安全审计处于未启用状态 (MCP_SSH_AUDIT_ENABLED=false)
+  [PASS] 服务身份标识 (ADR-0015): 服务标识名称: "mcp-server-ssh" (未配置额外引导指示)
+[目标主机连通性]
+  [PASS] 目标主机 TCP 连通性: 192.168.1.100:22 TCP 端口畅通 (耗时 12ms)
+  [PASS] SSH 握手与鉴权: 成功与 192.168.1.100:22 协商并完成公钥身份验证 (耗时 88ms)
+
+-------------------------------------------------
+诊断结果: 8 项通过, 0 项提示, 0 项失败
+=================================================
+```
 
 ---
 
@@ -624,6 +707,16 @@ docker run -i --rm \
 > 3. 从 prod 节点下载 /opt/app/schema.sql 并直接部署传输至 dev 节点对应目录。
 > ```
 > 🛠️ **底层工具链**：`ssh_connect` (多 connectionId) + `sftp_download` + `sftp_upload`
+
+#### 🎯 场景 9：MCP 服务存活验证、版本确认与心跳时延探测 (Ping)
+> **Prompt 复制即用**：
+> ```text
+> 帮我自检当前连接的 SSH MCP 服务状态：
+> 1. 调用 ssh_ping 发送心跳探针，携带自定义探针标识（如 probe-health）；
+> 2. 确认当前运行的 MCP 服务版本号与服务标识名称；
+> 3. 计算并汇报从客户端发起到收到响应的往返时延（RTT 毫秒数）。
+> ```
+> 🛠️ **底层工具链**：`ssh_ping` (`message: "probe-health"`)
 
 ---
 

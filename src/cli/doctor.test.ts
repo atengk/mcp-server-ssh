@@ -125,4 +125,38 @@ describe("CLI 全景自检排障套件 (runDoctor)", () => {
     expect(sshCheck?.status).toBe("FAIL");
     expect(sshCheck?.message).toContain("All configured authentication methods failed");
   });
+
+  it("当 SSE 模式外部绑定未配置 Token 时，doctor 应标记 FAIL 预警安全熔断", async () => {
+    const sseBadEnv = {
+      MCP_SSH_TRANSPORT: "sse",
+      MCP_SSH_SERVER_HOST: "0.0.0.0",
+    };
+
+    const result = await runDoctor({ env: sseBadEnv });
+    expect(result.success).toBe(false);
+    const sseCheck = result.checks.find((c) => c.name.includes("SSE 传输模式与安全鉴权"));
+    expect(sseCheck?.status).toBe("FAIL");
+    expect(sseCheck?.message).toContain("安全熔断阻断");
+  });
+
+  it("当配置了预建隧道与目标白名单时，doctor 应呈现 PASS 诊断信息", async () => {
+    const tunnelEnv = {
+      MCP_SSH_TUNNEL_TYPE: "socks5",
+      MCP_SSH_TUNNEL_LOCAL_PORT: "1080",
+      MCP_SSH_ALLOWED_TARGETS: "10.0.0.0/8,192.168.1.0/24",
+      MCP_SSH_DISABLE_DYNAMIC_CONNECT: "true",
+    };
+
+    const result = await runDoctor({ env: tunnelEnv });
+    expect(result.success).toBe(true);
+    const tunnelCheck = result.checks.find((c) => c.name === "预建端口转发隧道");
+    expect(tunnelCheck?.status).toBe("PASS");
+    expect(tunnelCheck?.message).toContain("socks5 隧道");
+
+    const allowCheck = result.checks.find((c) => c.name === "目标主机白名单 (ADR-0017)");
+    expect(allowCheck?.status).toBe("PASS");
+
+    const disableCheck = result.checks.find((c) => c.name === "动态建连开关 (ADR-0017)");
+    expect(disableCheck?.status).toBe("PASS");
+  });
 });

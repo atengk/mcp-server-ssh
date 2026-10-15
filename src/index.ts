@@ -178,7 +178,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
   const server = new McpServer(
     {
       name: serverName,
-      version: "1.2.0",
+      version: SERVICE_VERSION,
     },
     serverInstructions ? { instructions: serverInstructions } : undefined
   );
@@ -220,7 +220,7 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       const payload = {
         status: "ok",
         service: "mcp-server-ssh",
-        version: "1.1.0",
+        version: SERVICE_VERSION,
         echo: message ?? "pong",
         timestamp: new Date().toISOString(),
       };
@@ -1313,7 +1313,7 @@ export async function startServer(
         }),
       host: config.serverHost,
       port: config.serverPort,
-      serviceVersion: "1.1.0",
+      serviceVersion: SERVICE_VERSION,
       authToken: config.authToken,
       allowedOrigins: config.allowedOrigins,
     });

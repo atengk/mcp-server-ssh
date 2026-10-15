@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { ConnectionPool } from "../connection/pool.js";
 import { getPreConnectParams, parseEnv } from "../config/env.js";
+import { isLoopbackHost } from "../security/target-guard.js";
 
 /**
  * 诊断检查单项状态
@@ -235,13 +236,91 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         parsedConfig.serverInstructions ? ` (已注入自定义引导指示: ${parsedConfig.serverInstructions.length} 字符)` : " (未配置额外引导指示)"
       }`,
     });
+
+    // 3.4 SSE 网络模式与身份鉴权熔断体检 (ADR-0017)
+    if (parsedConfig.transport === "sse") {
+      const isLoopback = isLoopbackHost(parsedConfig.serverHost);
+      if (isLoopback) {
+        if (parsedConfig.authToken) {
+          checks.push({
+            category: "环境变量配置",
+            name: "SSE 传输模式与安全鉴权 (ADR-0017)",
+            status: "PASS",
+            message: `SSE 绑定本地回环 (${parsedConfig.serverHost}:${parsedConfig.serverPort})，已配置安全鉴权令牌`,
+          });
+        } else {
+          checks.push({
+            category: "环境变量配置",
+            name: "SSE 传输模式与安全鉴权 (ADR-0017)",
+            status: "WARN",
+            message: `SSE 绑定本地回环 (${parsedConfig.serverHost}:${parsedConfig.serverPort})，未配置 MCP_SSH_AUTH_TOKEN（仅建议用于本地测试）`,
+          });
+        }
+      } else {
+        if (parsedConfig.authToken) {
+          checks.push({
+            category: "环境变量配置",
+            name: "SSE 传输模式与安全鉴权 (ADR-0017)",
+            status: "PASS",
+            message: `SSE 外部网络绑定 (${parsedConfig.serverHost}:${parsedConfig.serverPort}) 已配置强身份鉴权令牌 (安全防线已确立)`,
+          });
+        } else {
+          checks.push({
+            category: "环境变量配置",
+            name: "SSE 传输模式与安全鉴权 (ADR-0017)",
+            status: "FAIL",
+            message: `安全熔断阻断：外部网络绑定 (${parsedConfig.serverHost}:${parsedConfig.serverPort}) 未配置 MCP_SSH_AUTH_TOKEN，启动将直接触发 Fail-Closed 熔断终止！`,
+          });
+        }
+      }
+    }
+
+    // 3.5 预建端口转发与 SOCKS5 代理隧道配置 (12-Factor App)
+    if (parsedConfig.tunnel) {
+      const t = parsedConfig.tunnel;
+      checks.push({
+        category: "环境变量配置",
+        name: "预建端口转发隧道",
+        status: "PASS",
+        message: `预建 ${t.type} 隧道 (${t.localHost}:${t.localPort} -> ${t.remoteHost}:${t.remotePort ?? "*"}, 熔断策略: ${t.idleTimeoutSeconds === 0 ? "常驻不超时" : `${t.idleTimeoutSeconds}s 自动回收`})`,
+      });
+    }
+
+    // 3.6 出站白名单与动态建连约束 (ADR-0017)
+    if (parsedConfig.allowedTargets && parsedConfig.allowedTargets.length > 0) {
+      checks.push({
+        category: "环境变量配置",
+        name: "目标主机白名单 (ADR-0017)",
+        status: "PASS",
+        message: `已激活出站目标白名单 (共 ${parsedConfig.allowedTargets.length} 条过滤规则)`,
+      });
+    }
+
+    if (parsedConfig.disableDynamicConnect) {
+      checks.push({
+        category: "环境变量配置",
+        name: "动态建连开关 (ADR-0017)",
+        status: "PASS",
+        message: "动态建连工具已彻底禁用 (MCP_SSH_DISABLE_DYNAMIC_CONNECT=true，仅放行预置目标或本地别名)",
+      });
+    }
   } catch (err) {
-    checks.push({
-      category: "环境变量配置",
-      name: "规范配置解析 (ADR-0012)",
-      status: "FAIL",
-      message: `环境变量存在非法或模糊输入: ${err instanceof Error ? err.message : String(err)}`,
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("安全熔断: 外部网络绑定")) {
+      checks.push({
+        category: "环境变量配置",
+        name: "SSE 传输模式与安全鉴权 (ADR-0017)",
+        status: "FAIL",
+        message: `安全熔断阻断：外部网络绑定未配置 MCP_SSH_AUTH_TOKEN，启动将直接触发 Fail-Closed 熔断终止！(${errMsg})`,
+      });
+    } else {
+      checks.push({
+        category: "环境变量配置",
+        name: "规范配置解析 (ADR-0012)",
+        status: "FAIL",
+        message: `环境变量存在非法或模糊输入: ${errMsg}`,
+      });
+    }
   }
 
 

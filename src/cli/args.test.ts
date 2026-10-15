@@ -49,5 +49,11 @@ describe("CLI 参数解析 (parseCLIArgs)", () => {
     expect(opts2.serverName).toBe("gpu-cluster");
     expect(opts2.serverInstructions).toBe("用于连接算力节点，请勿执行关机命令");
   });
+
+  it("应支持 doctor、version、help 位置子命令并映射为对应标志", () => {
+    expect(parseCLIArgs(["doctor"]).doctor).toBe(true);
+    expect(parseCLIArgs(["version"]).version).toBe(true);
+    expect(parseCLIArgs(["help"]).help).toBe(true);
+  });
 });
 

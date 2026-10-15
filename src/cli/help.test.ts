@@ -36,6 +36,9 @@ describe("CLI 帮助文档 (getHelpText)", () => {
     expect(text).toContain("MCP_SSH_ALLOWED_ORIGINS");
     expect(text).toContain("MCP_SSH_ALLOWED_TARGETS");
     expect(text).toContain("MCP_SSH_DISABLE_DYNAMIC_CONNECT");
+    expect(text).toContain("MCP_SSH_TUNNEL_TYPE");
+    expect(text).toContain("MCP_SSH_TUNNEL_LOCAL_PORT");
+    expect(text).toContain("doctor          运行四维全景自检排障套件");
     expect(text).toContain("共 29 项原子工具");
   });
 });

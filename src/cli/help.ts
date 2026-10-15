@@ -5,7 +5,8 @@
  * @since 2026-10-14
  */
 
-export const SERVICE_VERSION = "1.2.5";
+import { SERVICE_VERSION } from "./version.js";
+export { SERVICE_VERSION };
 
 /**
  * 生成并格式化完整的 CLI 帮助文档
@@ -19,8 +20,14 @@ mcp-server-ssh v${SERVICE_VERSION}
 
 使用方式:
   mcp-server-ssh [选项]
+  mcp-server-ssh <子命令>
 
-命令选项:
+子命令 (Subcommands):
+  doctor          运行四维全景自检排障套件 (等价于 --doctor)
+  version         显示当前版本号 (等价于 --version / -v)
+  help            显示帮助手册 (等价于 --help / -h)
+
+命令选项 (Options):
   -h, --help      显示帮助文档并立即退出
   -v, --version   显示当前版本号并立即退出
   --doctor        运行四维全景自检排障套件 (环境、凭据、网络与目标连通性)
@@ -56,6 +63,12 @@ mcp-server-ssh v${SERVICE_VERSION}
   MCP_SSH_PROXY_PASSWORD        ProxyJump 跳板机认证密码
   MCP_SSH_PROXY_PRIVATE_KEY_BASE64 ProxyJump 跳板机专用私钥 (Base64 编码)
   MCP_SSH_PROXY_KEY_PASSPHRASE  ProxyJump 跳板机私钥解密口令
+  MCP_SSH_TUNNEL_TYPE           预建隧道模式: "local" | "remote" | "socks5" (默认: "local")
+  MCP_SSH_TUNNEL_LOCAL_PORT     预建隧道本地监听端口 (0 为自动分配，socks5 默认: 1080)
+  MCP_SSH_TUNNEL_REMOTE_HOST    预建隧道远端目标服务地址 (默认: "127.0.0.1")
+  MCP_SSH_TUNNEL_REMOTE_PORT    预建隧道远端目标服务端口 (local/remote 必填)
+  MCP_SSH_TUNNEL_LOCAL_HOST     预建隧道本地网卡地址 (默认: "127.0.0.1")
+  MCP_SSH_TUNNEL_IDLE_TIMEOUT   预建隧道空闲超时秒数 (默认: 0，长驻不超时)
   MCP_SSH_TIMEOUT               连接就绪超时毫秒数 (默认: 30000)
   MCP_SSH_KEEP_ALIVE_INTERVAL   心跳保活探测间隔毫秒数 (默认: 10000)
   MCP_SSH_ALLOW_DANGEROUS_COMMANDS 严格布尔值 ("true" | "false")，是否放行危险命令 (默认: false)
@@ -75,9 +88,10 @@ mcp-server-ssh v${SERVICE_VERSION}
   - 系统诊断: ssh_system_diagnose (硬件/架构/内存/负载/监听端口只读巡检)
 
 快速上手示例:
-  # 查看帮助与排障诊断
+  # 查看帮助与排障诊断 (支持标志与子命令)
   $ npx @atengk/mcp-server-ssh --help
-  $ npx @atengk/mcp-server-ssh --doctor
+  $ npx @atengk/mcp-server-ssh doctor
+  $ npx @atengk/mcp-server-ssh version
 
   # 作为默认连接预启动
   $ MCP_SSH_HOST=192.168.1.100 MCP_SSH_USER=ubuntu npx @atengk/mcp-server-ssh

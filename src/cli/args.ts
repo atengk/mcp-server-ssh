@@ -47,7 +47,7 @@ function parseTrimmedString(value: unknown): string | undefined {
  */
 export function parseCLIArgs(args: string[] = process.argv.slice(2)): CLIOptions {
   try {
-    const { values } = parseArgs({
+    const { values, positionals } = parseArgs({
       args,
       options: {
         help: {
@@ -72,10 +72,12 @@ export function parseCLIArgs(args: string[] = process.argv.slice(2)): CLIOptions
       allowPositionals: true,
     });
 
+    const firstPositional = positionals && positionals.length > 0 ? positionals[0]?.toLowerCase() : undefined;
+
     return {
-      help: Boolean(values.help),
-      version: Boolean(values.version),
-      doctor: Boolean(values.doctor),
+      help: Boolean(values.help) || firstPositional === "help",
+      version: Boolean(values.version) || firstPositional === "version",
+      doctor: Boolean(values.doctor) || firstPositional === "doctor",
       serverName: parseTrimmedString(values["server-name"]),
       serverInstructions: parseTrimmedString(values["server-instructions"]),
     };
