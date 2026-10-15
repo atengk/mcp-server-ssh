@@ -220,6 +220,27 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       const masked = maskSensitiveConfig(config);
       expect(masked.authToken).toBe("***");
     });
+
+    it("正确解析 MCP_SSH_ALLOWED_TARGETS 与 MCP_SSH_DISABLE_DYNAMIC_CONNECT", () => {
+      const config = parseEnv({
+        MCP_SSH_ALLOWED_TARGETS: " 192.168.1.0/24 , *.internal.corp , bastion.example.com:2200 ",
+        MCP_SSH_DISABLE_DYNAMIC_CONNECT: "true",
+      });
+      expect(config.allowedTargets).toEqual([
+        "192.168.1.0/24",
+        "*.internal.corp",
+        "bastion.example.com:2200",
+      ]);
+      expect(config.disableDynamicConnect).toBe(true);
+    });
+
+    it("MCP_SSH_DISABLE_DYNAMIC_CONNECT 传非标值时抛出配置解析异常", () => {
+      expect(() =>
+        parseEnv({
+          MCP_SSH_DISABLE_DYNAMIC_CONNECT: "yes",
+        })
+      ).toThrowError(/必须为合法的布尔值/);
+    });
   });
 
   describe("预建连参数装配 (getPreConnectParams)", () => {

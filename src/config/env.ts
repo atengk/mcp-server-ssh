@@ -96,6 +96,14 @@ export interface AppConfig {
    * SSE 传输模式共享身份鉴权令牌 (ADR-0017)
    */
   authToken?: string;
+  /**
+   * 允许的目标主机白名单列表 (ADR-0017)
+   */
+  allowedTargets?: string[];
+  /**
+   * 是否禁用动态建连工具调用 (ADR-0017)
+   */
+  disableDynamicConnect: boolean;
 }
 
 
@@ -359,6 +367,20 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // 7. SSE 身份鉴权令牌 (ADR-0017)
   const authToken = getEnvValue(env, "MCP_SSH_AUTH_TOKEN");
 
+  // 8. 目标白名单与动态建连约束 (ADR-0017)
+  const allowedTargetsRaw = getEnvValue(env, "MCP_SSH_ALLOWED_TARGETS");
+  const allowedTargets = allowedTargetsRaw
+    ? allowedTargetsRaw
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+    : undefined;
+  const disableDynamicConnect = parseBoolean(
+    getEnvValue(env, "MCP_SSH_DISABLE_DYNAMIC_CONNECT"),
+    false,
+    "MCP_SSH_DISABLE_DYNAMIC_CONNECT"
+  );
+
   return {
     transport,
     serverHost,
@@ -372,6 +394,8 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     serverName,
     serverInstructions,
     authToken,
+    allowedTargets,
+    disableDynamicConnect,
   };
 }
 

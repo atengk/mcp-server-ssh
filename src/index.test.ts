@@ -563,6 +563,71 @@ Host test-alias
     const shutdown = await startServer(pool, mockEnvConfig as any, cliOptions as any);
     await shutdown();
   });
+
+  it("当配置 disableDynamicConnect 时调用 ssh_connect 工具应被直接拦截", async () => {
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const protectedServer = createMCPServer({
+      connectionPool: pool,
+      disableDynamicConnect: true,
+    });
+    const testClient = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      protectedServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    const res = await testClient.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("动态建连已被管理员禁用");
+
+    await testClient.close();
+    await protectedServer.close();
+  });
+
+  it("当配置 allowedTargets 时调用 ssh_connect 工具对非白名单目标进行拦截，对白名单目标放行", async () => {
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    const protectedServer = createMCPServer({
+      connectionPool: pool,
+      allowedTargets: ["192.168.1.0/24"],
+    });
+    const testClient = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      protectedServer.connect(sTransport),
+      testClient.connect(cTransport),
+    ]);
+
+    // 1. 尝试连接非白名单目标 -> 拦截
+    const resBlocked = await testClient.callTool({
+      name: "ssh_connect",
+      arguments: { host: "10.0.0.1", username: "root" },
+    });
+    expect(resBlocked.isError).toBe(true);
+    expect((resBlocked.content[0] as any).text).toContain("未包含在允许的目标白名单");
+
+    // 2. 尝试连接白名单内目标 -> 放行连接
+    const resAllowed = await testClient.callTool({
+      name: "ssh_connect",
+      arguments: { host: "192.168.1.50", username: "root" },
+    });
+    expect(resAllowed.isError).toBeFalsy();
+    const data = JSON.parse((resAllowed.content[0] as any).text);
+    expect(data.status).toBe("connected");
+
+    await testClient.close();
+    await protectedServer.close();
+  });
 });
 
 

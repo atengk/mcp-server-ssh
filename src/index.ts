@@ -14,6 +14,7 @@ import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/pool.js";
 import { SafetyGuard } from "./security/guard.js";
 import { OutputTruncator } from "./security/truncator.js";
+import { validateConnectionTarget } from "./security/target-guard.js";
 import { ExecService } from "./services/exec-service.js";
 import { SessionService } from "./services/session-service.js";
 import { SFTPService } from "./services/sftp-service.js";
@@ -84,6 +85,7 @@ export { parseCLIArgs, getHelpText, SERVICE_VERSION, runDoctor } from "./cli/ind
 export type { CLIOptions, DoctorCheckItem, DoctorResult, DoctorStatus } from "./cli/index.js";
 export { AuditService } from "./audit/index.js";
 export * from "./audit/types.js";
+export { isTargetAllowed, validateConnectionTarget } from "./security/target-guard.js";
 
 /**
  * MCP Server 初始化装配选项
@@ -105,6 +107,10 @@ export interface MCPServerOptions {
   serverName?: string;
   /** 注入大模型的系统级服务引导提示指示说明 (ADR-0015，握手即读) */
   serverInstructions?: string;
+  /** 允许的目标主机白名单列表 (ADR-0017) */
+  allowedTargets?: string[];
+  /** 是否禁用动态建连工具调用 (ADR-0017) */
+  disableDynamicConnect?: boolean;
 }
 
 
@@ -235,6 +241,27 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     SSHConnectParamsSchema.shape,
     async (params) => {
       try {
+        // 目标白名单与禁用动态建连守卫校验 (ADR-0017)
+        let targetHost = params.host;
+        let targetPort = params.port ?? 22;
+        if (!targetHost && params.sshConfigAlias) {
+          const aliasConfig = configParser.resolveHost(params.sshConfigAlias);
+          if (aliasConfig && aliasConfig.host) {
+            targetHost = aliasConfig.host;
+            targetPort = aliasConfig.port ?? targetPort;
+          }
+        }
+
+        validateConnectionTarget(
+          targetHost || "",
+          targetPort,
+          params.proxyJump,
+          {
+            allowedTargets: options?.allowedTargets,
+            disableDynamicConnect: options?.disableDynamicConnect,
+          }
+        );
+
         const info = await pool.connect(params);
         return {
           content: [
@@ -1188,6 +1215,8 @@ export async function startServer(
     allowDangerousCommands: config.allowDangerousCommands,
     serverName,
     serverInstructions,
+    allowedTargets: config.allowedTargets,
+    disableDynamicConnect: config.disableDynamicConnect,
   });
 
   // 1. 依据环境变量自动预建立默认主机连接
@@ -1230,6 +1259,8 @@ export async function startServer(
           auditService,
           serverName,
           serverInstructions,
+          allowedTargets: config.allowedTargets,
+          disableDynamicConnect: config.disableDynamicConnect,
         }),
       host: config.serverHost,
       port: config.serverPort,
