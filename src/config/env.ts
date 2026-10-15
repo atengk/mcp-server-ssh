@@ -92,6 +92,10 @@ export interface AppConfig {
    * 服务引导指示自然语言说明 (缺省时为空)
    */
   serverInstructions?: string;
+  /**
+   * SSE 传输模式共享身份鉴权令牌 (ADR-0017)
+   */
+  authToken?: string;
 }
 
 
@@ -352,6 +356,9 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const serverName = getEnvValue(env, "MCP_SSH_SERVER_NAME") || "mcp-server-ssh";
   const serverInstructions = getEnvValue(env, "MCP_SSH_SERVER_INSTRUCTIONS");
 
+  // 7. SSE 身份鉴权令牌 (ADR-0017)
+  const authToken = getEnvValue(env, "MCP_SSH_AUTH_TOKEN");
+
   return {
     transport,
     serverHost,
@@ -364,6 +371,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     audit,
     serverName,
     serverInstructions,
+    authToken,
   };
 }
 
@@ -400,6 +408,10 @@ export function maskSensitiveConfig(config: AppConfig): Record<string, any> {
     if (cloned.proxyJump.passphrase) {
       cloned.proxyJump.passphrase = "***";
     }
+  }
+
+  if (cloned.authToken) {
+    cloned.authToken = "***";
   }
 
   return cloned;

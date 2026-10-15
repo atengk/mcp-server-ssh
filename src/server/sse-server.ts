@@ -5,9 +5,47 @@
  * @since 2026-10-04
  */
 
+import crypto from "node:crypto";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+
+/**
+ * 使用常数时间比对验证身份鉴权令牌，防御时序侧信道攻击 (ADR-0017)
+ *
+ * 通过双重 SHA-256 哈希确保输入被压缩为固定 32 字节后调用 crypto.timingSafeEqual
+ *
+ * @param providedToken 客户端请求携带的 Token
+ * @param expectedToken 服务端配置的期望 Token
+ * @return 令牌一致时返回 true，否则返回 false
+ */
+export function verifyAuthToken(providedToken: string | undefined, expectedToken: string): boolean {
+  if (!providedToken || typeof providedToken !== "string") {
+    return false;
+  }
+  const hashProvided = crypto.createHash("sha256").update(providedToken).digest();
+  const hashExpected = crypto.createHash("sha256").update(expectedToken).digest();
+  return crypto.timingSafeEqual(hashProvided, hashExpected);
+}
+
+/**
+ * 从 HTTP 请求头或 URL 查询参数中提取 Bearer / Query Token
+ *
+ * @param req HTTP 入站请求
+ * @param parsedUrl 解析后的 URL 对象
+ * @return 提取到的 Token 字符串，未携带时返回 undefined
+ */
+export function extractToken(req: IncomingMessage, parsedUrl: URL): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.trim().toLowerCase().startsWith("bearer ")) {
+    return authHeader.trim().slice(7).trim();
+  }
+  const queryToken = parsedUrl.searchParams.get("token");
+  if (queryToken && queryToken.trim() !== "") {
+    return queryToken.trim();
+  }
+  return undefined;
+}
 
 /**
  * SSE 服务初始化配置选项
@@ -18,6 +56,10 @@ export interface SSEServerOptions {
   host?: string;
   port?: number;
   serviceVersion?: string;
+  /**
+   * SSE 共享身份鉴权令牌 (ADR-0017)
+   */
+  authToken?: string;
 }
 
 /**
@@ -93,7 +135,19 @@ export async function startSSEServer(options: SSEServerOptions): Promise<Running
       return;
     }
 
-    // 3. 建立 SSE 长轮询事件流端点 (/sse)
+    // 3. 身份鉴权拦截守卫 (针对 /sse 与 /message)
+    if (pathname === "/sse" || pathname === "/message") {
+      if (options.authToken) {
+        const token = extractToken(req, parsedUrl);
+        if (!verifyAuthToken(token, options.authToken)) {
+          res.writeHead(401, { "Content-Type": "text/plain" });
+          res.end("Unauthorized: Invalid or missing authentication token");
+          return;
+        }
+      }
+    }
+
+    // 4. 建立 SSE 长轮询事件流端点 (/sse)
     if (pathname === "/sse" && req.method === "GET") {
       try {
         const transport = new SSEServerTransport("/message", res);

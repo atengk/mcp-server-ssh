@@ -9,7 +9,7 @@ import http from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { startSSEServer, type RunningSSEServer } from "./sse-server.js";
+import { startSSEServer, verifyAuthToken, type RunningSSEServer } from "./sse-server.js";
 
 describe("HTTP SSE 传输服务 (SSEServer)", () => {
   let mcpServer: McpServer;
@@ -217,4 +217,95 @@ describe("HTTP SSE 传输服务 (SSEServer)", () => {
     ctrlA.abort();
     ctrlB.abort();
   });
+
+  describe("SSE 强身份令牌鉴权 (MCP_SSH_AUTH_TOKEN)", () => {
+    let authServer: RunningSSEServer;
+    let authBaseUrl: string;
+    const testSecret = "my-super-secret-token-123456";
+
+    beforeEach(async () => {
+      authServer = await startSSEServer({
+        authToken: testSecret,
+        serverFactory: () => {
+          const s = new McpServer({
+            name: "mcp-server-ssh-auth-test",
+            version: "1.0.0-test",
+          });
+          return s;
+        },
+        host: "127.0.0.1",
+        port: 0,
+      });
+      authBaseUrl = `http://127.0.0.1:${authServer.port}`;
+    });
+
+    afterEach(async () => {
+      if (authServer) {
+        await authServer.close();
+      }
+    });
+
+    it("未提供 Token 时访问 GET /sse 应返回 401 Unauthorized", async () => {
+      const res = await fetch(`${authBaseUrl}/sse`);
+      expect(res.status).toBe(401);
+      const text = await res.text();
+      expect(text).toContain("Unauthorized");
+    });
+
+    it("提供错误 Token 时访问 GET /sse 应返回 401 Unauthorized", async () => {
+      const res = await fetch(`${authBaseUrl}/sse`, {
+        headers: { Authorization: "Bearer wrong-token" },
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("未提供 Token 时访问 POST /message 应返回 401 Unauthorized", async () => {
+      const res = await fetch(`${authBaseUrl}/message?sessionId=any-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "ping", id: 1 }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("通过 Authorization: Bearer <token> 鉴权成功建立 SSE 连接", async () => {
+      const ctrl = new AbortController();
+      const res = await fetch(`${authBaseUrl}/sse`, {
+        signal: ctrl.signal,
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${testSecret}`,
+        },
+      });
+      expect(res.status).toBe(200);
+      ctrl.abort();
+    });
+
+    it("通过 ?token=<token> 查询参数鉴权成功建立 SSE 连接", async () => {
+      const ctrl = new AbortController();
+      const res = await fetch(`${authBaseUrl}/sse?token=${testSecret}`, {
+        signal: ctrl.signal,
+        headers: {
+          Accept: "text/event-stream",
+        },
+      });
+      expect(res.status).toBe(200);
+      ctrl.abort();
+    });
+
+    it("配置 Token 后健康检查 GET /health 仍应保持免密", async () => {
+      const res = await fetch(`${authBaseUrl}/health`);
+      expect(res.status).toBe(200);
+    });
+
+    it("verifyAuthToken 工具函数在不同长度或非法输入时正确执行常数时间安全比对", () => {
+      expect(verifyAuthToken("correct-token", "correct-token")).toBe(true);
+      expect(verifyAuthToken("wrong-token", "correct-token")).toBe(false);
+      expect(verifyAuthToken("short", "much-longer-expected-token")).toBe(false);
+      expect(verifyAuthToken(undefined, "expected-token")).toBe(false);
+      expect(verifyAuthToken("", "expected-token")).toBe(false);
+      expect(verifyAuthToken(null as any, "expected-token")).toBe(false);
+    });
+  });
 });
+

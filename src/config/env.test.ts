@@ -211,6 +211,15 @@ describe("环境变量集中解析体系 (parseEnv) - 严格治理", () => {
       expect(masked.target?.host).toBe("192.168.1.100");
       expect(masked.target?.username).toBe("root");
     });
+
+    it("authToken 应当在 maskSensitiveConfig 中被掩码为 ***", () => {
+      const config = parseEnv({
+        MCP_SSH_AUTH_TOKEN: "super-secret-token",
+      });
+      expect(config.authToken).toBe("super-secret-token");
+      const masked = maskSensitiveConfig(config);
+      expect(masked.authToken).toBe("***");
+    });
   });
 
   describe("预建连参数装配 (getPreConnectParams)", () => {

@@ -1234,6 +1234,7 @@ export async function startServer(
       host: config.serverHost,
       port: config.serverPort,
       serviceVersion: "1.1.0",
+      authToken: config.authToken,
     });
 
     process.stderr.write(
