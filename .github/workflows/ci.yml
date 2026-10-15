@@ -41,7 +41,7 @@ jobs:
       pull-requests: read
     steps:
       - name: 校验 PR 标题符合 Conventional Commits
-        uses: amannn/action-semantic-pull-request@v5
+        uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -69,7 +69,7 @@ jobs:
       code_changed: ${{ steps.filter.outputs.code }}
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 分析改动文件类型
         uses: dorny/paths-filter@v3
@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6
@@ -98,7 +98,7 @@ jobs:
           version: 9
 
       - name: 设置 Node.js 环境
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: 'pnpm'
@@ -127,7 +127,7 @@ jobs:
 
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6
@@ -135,7 +135,7 @@ jobs:
           version: 9
 
       - name: 设置 Node.js 环境
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
