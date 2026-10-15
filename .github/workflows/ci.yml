@@ -69,7 +69,7 @@ jobs:
       code_changed: ${{ steps.filter.outputs.code }}
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 分析改动文件类型
         uses: dorny/paths-filter@v3
@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6
@@ -127,7 +127,7 @@ jobs:
 
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6

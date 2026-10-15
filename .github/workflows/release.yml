@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6
@@ -79,7 +79,7 @@ jobs:
       has_dockerfile: ${{ steps.probe.outputs.has_dockerfile }}
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -167,7 +167,7 @@ jobs:
       contents: write
     steps:
       - name: 检出源码 (全量历史供日志生成)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -213,7 +213,7 @@ jobs:
       id-token: write # 现代 npm Trusted Publishing (OIDC) 核心权限
     steps:
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v6
@@ -270,7 +270,7 @@ jobs:
         run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: 检出源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 设置 QEMU 模拟器 (多架构支持)
         uses: docker/setup-qemu-action@v3
