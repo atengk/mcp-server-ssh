@@ -12,13 +12,15 @@ import { ConnectionCircuitBreaker, HostInCooldownError } from "./circuit-breaker
 import { ConnectionPool } from "./pool.js";
 
 describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () => {
+  let currentTimeMs = new Date("2026-10-30T12:00:00.000Z").getTime();
+
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
+    currentTimeMs = new Date("2026-10-30T12:00:00.000Z").getTime();
+    vi.spyOn(Date, "now").mockImplementation(() => currentTimeMs);
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("当目标主机建连失败时进入 60 秒冷却期，冷却期内再次连接直接抛出 HostInCooldownError 且不新建底层 Socket", async () => {
@@ -50,7 +52,7 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
     expect(socketCreatedCount).toBe(1);
 
     // 推进 30 秒（仍在 60 秒冷却期内），再次请求同一目标
-    vi.advanceTimersByTime(30_000);
+    currentTimeMs += 30_000;
 
     let caughtError: unknown;
     try {
@@ -101,7 +103,7 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
     expect(pool.listFailedTargets()[0].state).toBe("open");
 
     // 2. 推进 60s 冷却期届满，状态变为 half_open，允许发起半开探活
-    vi.advanceTimersByTime(60_000);
+    currentTimeMs += 60_000;
     expect(pool.listFailedTargets()[0].state).toBe("half_open");
 
     // 半开探活再次失败，刷新 60s 冷却时间
@@ -111,14 +113,14 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
     expect(socketCreatedCount).toBe(2);
 
     // 仅过 40s 时尝试连接，应因冷却时间被刷新而继续拦截
-    vi.advanceTimersByTime(40_000);
+    currentTimeMs += 40_000;
     await expect(
       pool.connect({ host: "10.0.0.50", port: 22, username: "admin" })
     ).rejects.toThrow(HostInCooldownError);
     expect(socketCreatedCount).toBe(2);
 
     // 3. 再推进 20s（满 60s），此时远端恢复正常，半开探活成功
-    vi.advanceTimersByTime(20_000);
+    currentTimeMs += 20_000;
     shouldSucceed = true;
 
     const info = await pool.connect({ host: "10.0.0.50", port: 22, username: "admin" });
@@ -128,7 +130,7 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
     expect(pool.listFailedTargets()).toHaveLength(0);
   });
 
-  it("当底层握手挂起超过探测超时（默认 6 秒）时，应主动中断握手、立即释放底层资源并触发熔断", async () => {
+  it("当底层握手挂起超过探测超时时，应主动中断握手、立即释放底层资源并触发熔断", async () => {
     const endSpy = vi.fn();
     const destroySpy = vi.fn();
     let socketCreatedCount = 0;
@@ -145,19 +147,17 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
 
     const pool = new ConnectionPool({
       clientFactory,
+      connectTimeoutMs: 50,
     });
 
-    const connectPromise = pool.connect({
-      host: "10.0.0.254",
-      port: 22,
-      username: "root",
-    });
-    const rejectionAssertion = expect(connectPromise).rejects.toThrow(/连接探测超时 \(6000ms\)/);
+    await expect(
+      pool.connect({
+        host: "10.0.0.254",
+        port: 22,
+        username: "root",
+      })
+    ).rejects.toThrow(/连接探测超时 \(50ms\)/);
 
-    // 推进默认 6 秒触发主动超时守卫
-    await vi.advanceTimersByTimeAsync(6_000);
-
-    await rejectionAssertion;
     // 验证超时后立即释放底层 Socket/Client 资源
     expect(endSpy).toHaveBeenCalledTimes(1);
     expect(destroySpy).toHaveBeenCalledTimes(1);
@@ -176,7 +176,7 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
 
     const endSpy = vi.fn();
     const pool = new ConnectionPool({
-      connectTimeoutMs: 3_500,
+      connectTimeoutMs: 40,
       clientFactory: () => {
         const client = new EventEmitter() as any;
         client.end = endSpy;
@@ -186,10 +186,9 @@ describe("ConnectionCircuitBreaker 与 ConnectionPool 熔断防爆保护", () =>
       },
     });
 
-    const p = pool.connect({ host: "10.0.0.200", username: "root" });
-    const assertion = expect(p).rejects.toThrow(/连接探测超时 \(3500ms\)/);
-    await vi.advanceTimersByTimeAsync(3_500);
-    await assertion;
+    await expect(
+      pool.connect({ host: "10.0.0.200", username: "root" })
+    ).rejects.toThrow(/连接探测超时 \(40ms\)/);
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 });
