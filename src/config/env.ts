@@ -91,6 +91,8 @@ export interface AppConfig {
   serverHost: string;
   serverPort: number;
   timeoutMs: number;
+  /** 连接探测超时时间（毫秒，默认 6000ms） */
+  connectTimeoutMs: number;
   keepAliveIntervalMs: number;
   allowDangerousCommands: boolean;
   target?: TargetHostConfig;
@@ -323,6 +325,12 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     "MCP_SSH_TIMEOUT",
     "超时时间"
   );
+  const connectTimeoutMs = parsePositiveInt(
+    getEnvValue(env, "MCP_SSH_CONNECT_TIMEOUT_MS"),
+    6000,
+    "MCP_SSH_CONNECT_TIMEOUT_MS",
+    "超时时间"
+  );
   const keepAliveIntervalMs = parsePositiveInt(
     getEnvValue(env, "MCP_SSH_KEEP_ALIVE_INTERVAL"),
     10000,
@@ -508,6 +516,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     serverHost,
     serverPort,
     timeoutMs,
+    connectTimeoutMs,
     keepAliveIntervalMs,
     allowDangerousCommands,
     target,

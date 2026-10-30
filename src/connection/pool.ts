@@ -7,6 +7,23 @@
 
 import { Client, type ConnectConfig } from "ssh2";
 import type { ConnectionInfo, ProxyJumpOptions, SSHConnectParams } from "../types/connection.js";
+import {
+  ConnectionCircuitBreaker,
+  DEFAULT_COOLDOWN_MS,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  HostInCooldownError,
+  type CircuitBreakerFailureRecord,
+  type ConnectionCircuitBreakerOptions,
+} from "./circuit-breaker.js";
+
+export {
+  ConnectionCircuitBreaker,
+  DEFAULT_COOLDOWN_MS,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  HostInCooldownError,
+  type CircuitBreakerFailureRecord,
+  type ConnectionCircuitBreakerOptions,
+};
 import { SSHConfigParser } from "./config-parser.js";
 import { CredentialResolver } from "./credentials.js";
 
@@ -36,6 +53,12 @@ export interface ConnectionPoolOptions {
   configParser?: SSHConfigParser;
   /** 可选的主机凭据解析器实例 */
   credentialResolver?: CredentialResolver;
+  /** 可选的宿主机防爆连接熔断器实例 */
+  circuitBreaker?: ConnectionCircuitBreaker;
+  /** 熔断冷却期时长（毫秒），默认 60000ms */
+  cooldownMs?: number;
+  /** 默认连接探测超时时长（毫秒），未显式传入 readyTimeout 时使用 */
+  connectTimeoutMs?: number;
 }
 
 /**
@@ -48,6 +71,8 @@ export class ConnectionPool {
   private clientFactory: () => Client;
   private configParser: SSHConfigParser;
   private credentialResolver: CredentialResolver;
+  private circuitBreaker: ConnectionCircuitBreaker;
+  private connectTimeoutMs: number;
   private lastConnectionError: string | null = null;
   private disconnectListeners = new Set<(connectionId: string) => void>();
 
@@ -55,6 +80,28 @@ export class ConnectionPool {
     this.clientFactory = options?.clientFactory ?? (() => new Client());
     this.configParser = options?.configParser ?? new SSHConfigParser();
     this.credentialResolver = options?.credentialResolver ?? new CredentialResolver();
+    this.circuitBreaker =
+      options?.circuitBreaker ??
+      new ConnectionCircuitBreaker({ cooldownMs: options?.cooldownMs });
+    this.connectTimeoutMs = options?.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+  }
+
+  /**
+   * 获取当前连接池绑定的熔断器实例
+   *
+   * @return 连接熔断器实例
+   */
+  public getCircuitBreaker(): ConnectionCircuitBreaker {
+    return this.circuitBreaker;
+  }
+
+  /**
+   * 列出当前所有处于熔断状态的目标主机记录
+   *
+   * @return 熔断状态快照列表（无匹配时返回空数组）
+   */
+  public listFailedTargets(): CircuitBreakerFailureRecord[] {
+    return this.circuitBreaker.listFailureRecords();
   }
 
   /**
@@ -87,6 +134,8 @@ export class ConnectionPool {
    * @throws 当网络连接超时、鉴权失败或跳板机不可达时抛出异常
    */
   public async connect(params: SSHConnectParams): Promise<ConnectionInfo> {
+    let targetKey: string | undefined;
+    let jumpClient: Client | undefined;
     try {
       // 1. 若指定了 Host 别名，优先从 ~/.ssh/config 继承配置
       let effectiveParams: SSHConnectParams = { ...params };
@@ -101,7 +150,17 @@ export class ConnectionPool {
         throw new Error("无法建立连接：未指定目标主机地址 (host) 且别名解析失败");
       }
 
-      // 2. 生成或确定 connectionId
+      if (effectiveParams.readyTimeout === undefined && this.connectTimeoutMs !== undefined) {
+        effectiveParams.readyTimeout = this.connectTimeoutMs;
+      }
+
+      // 2. 计算熔断器追踪标识并在分配底层 Socket 前执行冷却期拦截 (Fail-Fast)
+      targetKey =
+        params.sshConfigAlias ||
+        `${effectiveParams.host}:${effectiveParams.port || 22}`;
+      this.circuitBreaker.assertCanConnect(targetKey);
+
+      // 3. 生成或确定 connectionId
       const connectionId = effectiveParams.connectionId || `conn_${this.idCounter++}`;
 
       // 若已存在同名活跃连接，先安全断开旧连接
@@ -109,12 +168,14 @@ export class ConnectionPool {
         await this.disconnect(connectionId);
       }
 
-      // 3. 处理 ProxyJump 堡垒机跳板中继
-      let jumpClient: Client | undefined;
+      // 4. 处理 ProxyJump 堡垒机跳板中继
       let streamSocket: any;
 
       if (effectiveParams.proxyJump) {
         const jumpTarget = this.parseProxyJumpTarget(effectiveParams.proxyJump);
+        if (jumpTarget.readyTimeout === undefined && effectiveParams.readyTimeout !== undefined) {
+          jumpTarget.readyTimeout = effectiveParams.readyTimeout;
+        }
         const jumpCreds = await this.credentialResolver.resolve(jumpTarget);
 
         jumpClient = await this.createClientInstance(jumpCreds);
@@ -137,16 +198,16 @@ export class ConnectionPool {
         });
       }
 
-      // 4. 解析目标主机的认证凭据与底层连接配置
+      // 5. 解析目标主机的认证凭据与底层连接配置
       const targetConfig = await this.credentialResolver.resolve(effectiveParams);
       if (streamSocket) {
         targetConfig.sock = streamSocket;
       }
 
-      // 5. 建立最终目标主机连接
+      // 6. 建立最终目标主机连接
       const client = await this.createClientInstance(targetConfig);
 
-      // 6. 监听断开与异常事件以实施连接池自愈与清理
+      // 7. 监听断开与异常事件以实施连接池自愈与清理
       client.on("close", () => {
         this.handleConnectionClosed(connectionId);
       });
@@ -181,9 +242,16 @@ export class ConnectionPool {
         this.setDefaultConnection(connectionId);
       }
 
+      this.circuitBreaker.recordSuccess(targetKey);
       this.lastConnectionError = null;
       return info;
     } catch (err) {
+      if (jumpClient) {
+        this.safeReleaseClient(jumpClient);
+      }
+      if (targetKey && !(err instanceof HostInCooldownError)) {
+        this.circuitBreaker.recordFailure(targetKey, err);
+      }
       this.lastConnectionError = err instanceof Error ? err.message : String(err);
       throw err;
     }
@@ -289,12 +357,26 @@ export class ConnectionPool {
   }
 
   /**
-   * 底层通过 Promise 包装异步建连过程
+   * 底层通过 Promise 包装异步建连过程，实施主动超时守卫与底层 Socket 资源即刻释放
    */
   private createClientInstance(config: ConnectConfig): Promise<Client> {
     return new Promise((resolve, reject) => {
       const client = this.clientFactory();
       let isSettled = false;
+      const timeoutMs = config.readyTimeout ?? this.connectTimeoutMs;
+
+      const timeoutTimer = setTimeout(() => {
+        if (!isSettled) {
+          isSettled = true;
+          cleanup();
+          this.safeReleaseClient(client);
+          reject(
+            new Error(
+              `SSH 连接探测超时 (${timeoutMs}ms): ${config.host ?? "unknown"}:${config.port ?? 22}`
+            )
+          );
+        }
+      }, timeoutMs);
 
       const onReady = () => {
         if (!isSettled) {
@@ -308,11 +390,13 @@ export class ConnectionPool {
         if (!isSettled) {
           isSettled = true;
           cleanup();
+          this.safeReleaseClient(client);
           reject(err);
         }
       };
 
       const cleanup = () => {
+        clearTimeout(timeoutTimer);
         client.removeListener("ready", onReady);
         client.removeListener("error", onError);
       };
@@ -326,6 +410,22 @@ export class ConnectionPool {
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     });
+  }
+
+  /**
+   * 安全关闭并立即销毁底层 SSH2 Client 实例与关联 Socket
+   */
+  private safeReleaseClient(client: Client): void {
+    try {
+      client.end();
+    } catch {
+      // 忽略已断开连接的二次关闭异常
+    }
+    try {
+      (client as any).destroy?.();
+    } catch {
+      // 忽略底层 Socket 销毁阶段异常
+    }
   }
 
   /**

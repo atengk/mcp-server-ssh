@@ -76,7 +76,17 @@ export { getPreConnectParams, maskSensitiveConfig, parseEnv } from "./config/env
 export type { AppConfig, ProxyJumpConfig, TargetHostConfig, TransportMode } from "./config/env.js";
 export { startSSEServer };
 export type { RunningSSEServer, SSEServerOptions };
-export { ConnectionPool } from "./connection/pool.js";
+export {
+  ConnectionCircuitBreaker,
+  ConnectionPool,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_COOLDOWN_MS,
+  HostInCooldownError,
+} from "./connection/pool.js";
+export type {
+  CircuitBreakerFailureRecord,
+  ConnectionCircuitBreakerOptions,
+} from "./connection/pool.js";
 export { SSHConfigParser } from "./connection/config-parser.js";
 export { SystemService } from "./services/system-service.js";
 export { TunnelService } from "./services/tunnel-service.js";
@@ -123,13 +133,19 @@ export interface MCPServerOptions {
  * @return 配置完成的 McpServer 实例
  */
 export function createMCPServer(options?: MCPServerOptions): McpServer {
+  const envConfig = parseEnv();
   const configParser = options?.configParser ?? new SSHConfigParser();
-  const pool = options?.connectionPool ?? new ConnectionPool({ configParser });
+  const pool =
+    options?.connectionPool ??
+    new ConnectionPool({
+      configParser,
+      connectTimeoutMs: envConfig.connectTimeoutMs,
+    });
   const safetyGuard = options?.safetyGuard ?? new SafetyGuard();
   const outputTruncator = options?.outputTruncator ?? new OutputTruncator();
   const auditService =
     options?.auditService ??
-    new AuditService(parseEnv().audit);
+    new AuditService(envConfig.audit);
   const execService =
     options?.execService ??
     new ExecService({
@@ -169,7 +185,6 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       execService,
     });
 
-  const envConfig = parseEnv();
   const serverName = options?.serverName ?? envConfig.serverName;
   const serverInstructions = options?.serverInstructions ?? envConfig.serverInstructions;
   const allowedTargets = options?.allowedTargets ?? envConfig.allowedTargets;
@@ -1249,7 +1264,12 @@ export async function startServer(
   const serverInstructions = customCliOptions?.serverInstructions ?? config.serverInstructions;
 
   const configParser = new SSHConfigParser();
-  const pool = customPool ?? new ConnectionPool({ configParser });
+  const pool =
+    customPool ??
+    new ConnectionPool({
+      configParser,
+      connectTimeoutMs: config.connectTimeoutMs,
+    });
   const tunnelService = new TunnelService({ connectionPool: pool });
   const auditService = new AuditService(config.audit);
   const server = createMCPServer({
