@@ -8,7 +8,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-1.x-orange.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/tests-226%2F226%20passing-brightgreen.svg?style=flat-square)](./src)
+[![Tests](https://img.shields.io/badge/tests-239%2F239%20passing-brightgreen.svg?style=flat-square)](./src)
 
 基于标准 **OpenSSH 协议** 深度连接与操控 Linux/Unix 系统的 **Model Context Protocol (MCP)** 服务。为大语言模型（LLM）和 AI 智能体（Claude Desktop、Cursor、Antigravity、Cline 等）提供安全、可控、零侵入的远程终端执行与 POSIX 文件系统管理基础设施。
 
@@ -19,9 +19,13 @@
 ## 🌟 核心特性 (Features)
 
 - **🌐 零侵入标准协议直连**：目标 Linux 主机仅需原生 OpenSSH 服务，绝不安装任何专有 Agent 或 HTTP 守护进程（[ADR-0001](docs/adr/0001-direct-openssh-protocol.md)）。
-- **⚡ 双模命令执行引擎**（[ADR-0002](docs/adr/0002-dual-execution-modes.md)）：
+- **⚡ 双模命令执行与多主机批量调度引擎**（[ADR-0002](docs/adr/0002-dual-execution-modes.md)）：
   - **无状态执行 (`ssh_exec`)**：单命令独立通道，默认包装为登录 Shell（`bash -l -c`）以完整继承用户环境变量与 `PATH`，精确捕获退出码、耗时与标准输出/错误；支持管道隐式注入凭据的 **零命令行泄露安全 Sudo 提权**（[ADR-0011](docs/adr/0011-zero-leak-sudo-and-unified-tunnel-governance.md)）。
+  - **多主机批量受控执行 (`ssh_batch_exec`)**：支持通过显式连接 ID、本机 `~/.ssh/config` 别名、通配符（如 `web-*`）及宏选择器（`@all_active`、`@all_configured`）向数十台节点发起受控并发（`parallel` 信号量限流）或渐进串行（`serial` 遇错中断 `stopOnError`）命令调度，单节点输出强制实施 **16KB 紧凑防爆截断**。
   - **交互式会话 (`ssh_session_*`)**：基于 PTY 伪终端维持常驻会话流，支持流式增量回显、正则提示符监听（`expectPattern`）与 `\x03` (Ctrl+C) 中断控制信号。
+- **🛡️ 宿主机防爆与防雪崩熔断冷却 (`ConnectionCircuitBreaker`)**：
+  - **启动异步软容错预连 (`MCP_SSH_PRECONNECT_TARGETS`)**：启动阶段后台并发拉起多台预设主机，单节点失联绝不阻塞 MCP 握手主流程；
+  - **6 秒快速探测超时与 60 秒熔断冷却**：建连失败立即销毁底层 Socket 并进入 60 秒冷却期（`Cooldown`），冷却期内重复请求就地快速拒绝（零底层 Socket / FD 分配），冷却期满自动转入半开（`Half-Open`）单次探活自愈。
 - **⏱️ 用户态脱机解耦后台作业 (`ssh_job_*`)**：通过系统解耦技术在远端独立托管耗时脚本、大文件拉取或构建任务，支持退出码精准判定与增量日志流式追踪，连接断开任务不终止（[ADR-0010](docs/adr/0010-detached-background-jobs-architecture.md)）。
 - **📁 高级 POSIX SFTP 管理与流式归档**：
   - **精准文本差异补丁 (`sftp_patch_file`)**：基于目标锚点块校验的局部精准替换，避免大文件全量覆写（[ADR-0009](docs/adr/0009-remote-file-diff-patching.md)）；
@@ -34,7 +38,7 @@
   - **目标主机白名单 (`Target Allowlist`)**：支持 IP、CIDR 网段、通配符域名与端口约束，阻断内网横向跳板渗透；
   - **来源白名单与跨域重塑 (`Origin Whitelist`)**：彻底废除通配符 `*`，精确匹配请求来源以防御跨站攻击。
 - **🏷️ 多实例服务标识与引导指示 (`--server-name` / `--server-instructions`)**：协议级一等公民下发，在多服务并存时向大模型精准传递系统角色定位，工具描述自动修饰紧凑前缀（[ADR-0015](docs/adr/0015-multi-instance-server-identity-and-instructions.md)）。
-- **📜 全景生命周期安全审计 (`AuditService`)**：记录全量 29 个原子工具调用的调用源、入参深度凭据脱敏（密码/私钥自动打码掩饰）与执行耗时，支持纯 Node 原生免依赖多文件轮转切分（[ADR-0014](docs/adr/0014-audit-trail-and-security-compliance.md)）。
+- **📜 全景生命周期安全审计 (`AuditService`)**：记录全量 30 个原子工具调用的调用源、入参深度凭据脱敏（密码/私钥自动打码掩饰）与执行耗时，支持纯 Node 原生免依赖多文件轮转切分（[ADR-0014](docs/adr/0014-audit-trail-and-security-compliance.md)）。
 - **🩺 四维全景自检排障套件 (`--doctor`)**：涵盖 Runtime 运行时、本地 OpenSSH 密钥链、配置合规性与目标连通性全方位秒级诊断巡检（[ADR-0013](docs/adr/0013-cli-suite-and-health-doctor.md)）。
 - **🛡️ 严格安全防护双保险**（[ADR-0003](docs/adr/0003-safety-guard-and-output-truncation.md)）：
   - **前置安全守卫 (`SafetyGuard`)**：实时拦截全盘强删（`rm -rf /`）、磁盘覆写（`dd`/`mkfs`）、关机重启（`reboot`/`shutdown`）及 Fork 炸弹等致命破坏，支持 `dryRun` 演练。
@@ -86,7 +90,7 @@ $ npx @atengk/mcp-server-ssh [选项 / 子命令]
 
 | 命令形态 / 选项标志 | 等价子命令 (Subcommand) | 类型 | 说明与行为 |
 | :--- | :--- | :--- | :--- |
-| `-h`, `--help` | `help` | 布尔标志 | 打印包含全部 12-Factor 环境变量、29 项原子工具与快速上手范例的帮助手册并退出 |
+| `-h`, `--help` | `help` | 布尔标志 | 打印包含全部 12-Factor 环境变量、30 项原子工具与快速上手范例的帮助手册并退出 |
 | `-v`, `--version` | `version` | 布尔标志 | 打印当前安装与运行的服务版本号（如 `v1.4.0`）并退出 |
 | `--doctor` | `doctor` | 布尔标志 | 启动四维全景自检排障套件，对运行时、密钥链、网络安全与目标连通性进行秒级诊断 |
 | `--server-name <name>` | *(无)* | 字符串参数 | 自定义当前服务实例的唯一命名空间标识（默认: `"mcp-server-ssh"`） |
@@ -314,7 +318,8 @@ npx @atengk/mcp-server-ssh doctor
 | **私钥文本内容** | `MCP_SSH_PRIVATE_KEY` | PEM 多行文本 | 原始 PEM 格式私钥文本（自动还原环境转义的 `\n` 换行） |
 | **Base64 私钥** | `MCP_SSH_PRIVATE_KEY_BASE64` | Base64 编码字符串 | Base64 编码私钥（彻底避免换行丢失，容器与云原生免文件挂载规范推荐） |
 | **私钥解密口令** | `MCP_SSH_KEY_PASSPHRASE` | 敏感字符串 | 若私钥受密码保护，提供解密口令 |
-| **配置别名** | `MCP_SSH_CONFIG_ALIAS` | 字符串 | 匹配并继承本地 `~/.ssh/config` 中的 Host 别名 |
+| **配置别名** | `MCP_SSH_CONFIG_ALIAS` | 字符串 | 匹配并继承本地 `~/.ssh/config` 中的单个默认 Host 别名 |
+| **多主机异步预连** | `MCP_SSH_PRECONNECT_TARGETS` | 逗号分隔别名列表 | 启动阶段后台异步并发预连接的主机别名列表（如 `"web-1,web-2,db-1"`，对应 `~/.ssh/config` 中的 Host 别名）；采用软容错（Fail-Soft）机制，单节点离线不阻断服务启动并自动进入熔断冷却保护 |
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_HOST` | 主机名 / IP 地址 | ProxyJump 堡垒机/跳板机 IP 或域名（专用于初始物理建连） |
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_PORT` | 整数: `1` ~ `65535` | ProxyJump 跳板机 SSH 端口，默认 `22` |
 | **ProxyJump 跳板** | `MCP_SSH_PROXY_USER` | 字符串 | ProxyJump 跳板机认证用户名 |
@@ -329,7 +334,8 @@ npx @atengk/mcp-server-ssh doctor
 | **预建空闲熔断** | `MCP_SSH_TUNNEL_IDLE_TIMEOUT` | 非负整数秒 | 预建隧道空闲超时自动关闭秒数，默认 `0`（常驻不超时，伴随 MCP 物理连接生命周期） |
 | **服务身份标识** | `MCP_SSH_SERVER_NAME` | 字符串 | 自定义服务唯一命名空间（默认 `mcp-server-ssh`，非默认值触发工具描述前缀） |
 | **服务引导指示** | `MCP_SSH_SERVER_INSTRUCTIONS` | 多行文本 | 系统级服务角色与操作边界引导说明上下文（握手阶段下发给大模型） |
-| **连接超时时间** | `MCP_SSH_TIMEOUT` | 正整数毫秒 | 目标建连与握手超时时间（毫秒），默认 `30000` |
+| **连接超时时间** | `MCP_SSH_TIMEOUT` | 正整数毫秒 | 单主机显式建连与握手超时时间（毫秒），默认 `30000` |
+| **快速探测超时** | `MCP_SSH_CONNECT_TIMEOUT_MS` | 正整数毫秒 | 多主机预连与连接池快速探测握手超时时间（毫秒），默认 `6000`（6 秒快速探测超时，超时立即销毁底层 Socket 并触发熔断冷却） |
 | **心跳保活间隔** | `MCP_SSH_KEEP_ALIVE_INTERVAL` | 正整数毫秒 | KeepAlive 心跳间隔（毫秒），默认 `10000` |
 | **致命命令逃生** | `MCP_SSH_ALLOW_DANGEROUS_COMMANDS` | 严格布尔: `"true"` \| `"false"` | 是否放行全盘强删等致命破坏命令，默认 `false` 严格阻断 |
 | **安全审计开关** | `MCP_SSH_AUDIT_ENABLED` | 严格布尔: `"true"` \| `"false"` | 是否激活全景审计轨迹（配置 `MCP_SSH_AUDIT_LOG_PATH` 时自动开启） |
@@ -496,7 +502,7 @@ docker run -i --rm \
 1. **CLI 命令行长选项接入**：`--server-name <name>` 与 `--server-instructions <text>`；
 2. **规范环境变量接入**：`MCP_SSH_SERVER_NAME` 与 `MCP_SSH_SERVER_INSTRUCTIONS`（CLI 选项优先级高于环境变量）；
 3. **协议级一等公民握手**：在服务初始化时直接向客户端与大模型下发唯一服务身份名称及角色操作边界；
-4. **工具描述自动紧凑修饰**：所有对外暴露的 29 个 MCP 工具描述前自动透明追加 `[<serverName>] ` 紧凑前缀（如 `[prod-bastion] 无状态执行远程 Bash 命令...`），彻底终结大模型混淆调用目标的隐患！
+4. **工具描述自动紧凑修饰**：所有对外暴露的 30 个 MCP 工具描述前自动透明追加 `[<serverName>] ` 紧凑前缀（如 `[prod-bastion] 无状态执行远程 Bash 命令...`），彻底终结大模型混淆调用目标的隐患！
 
 #### Claude Desktop / Cursor 实战配置示范：
 
@@ -543,13 +549,195 @@ docker run -i --rm \
 
 ---
 
-### 模式三：继承本地 `~/.ssh/config` 集群别名（零凭证泄露）
+### 模式三：继承本地 `~/.ssh/config` 集群别名与启动异步预建连（零凭证泄露）
 
 在宿主机的 `~/.ssh/config` 中配置多主机拓扑（含各自私钥、自定义端口与跳板机），启动服务后，无需在聊天中告知 AI 任何敏感 IP 或密码：
 > **用户**：“帮我连上本地配置里的 `ali-prod` 和 `tencent-test` 主机。”  
 > 🤖 **AI**：自动通过 `sshConfigAlias` 建立连接并映射路由，安全优雅！
 
----
+#### 1. 多主机启动异步预连接 (`MCP_SSH_PRECONNECT_TARGETS`)
+如果希望在 MCP 服务启动时即刻在后台并发预热多台 `~/.ssh/config` 主机，可通过 `MCP_SSH_PRECONNECT_TARGETS` 传入逗号分隔的别名列表（并可配合 `MCP_SSH_CONNECT_TIMEOUT_MS` 控制快速探测超时）：
+
+```json
+{
+  "mcpServers": {
+    "ssh-cluster": {
+      "command": "npx",
+      "args": ["-y", "@atengk/mcp-server-ssh"],
+      "env": {
+        "MCP_SSH_PRECONNECT_TARGETS": "web-1,web-2,db-1",
+        "MCP_SSH_CONNECT_TIMEOUT_MS": "6000"
+      }
+    }
+  }
+}
+```
+- **异步非阻塞握手**：预连任务在 `server.connect(transport)` 完成后于后台异步并发触发（默认并发上限 5），绝不阻塞 MCP 客户端初始化响应；
+- **软容错（Fail-Soft）与首台默认路由**：列表中首个成功建连的节点（如 `web-1`）自动注册为默认连接（`Default Connection`）；即便部分节点（如 `db-1`）关机离线，服务依旧正常启动并仅将离线节点标记进入熔断冷却期。
+
+#### 2. 灵活目标选择器 (`Target Selectors`)
+在调用批量执行工具 `ssh_batch_exec` 时，`targets` 参数不仅支持显式连接 ID 或 `~/.ssh/config` 别名，还内置了由 `TargetResolver` 驱动的灵活选择器语法（自动保序去重，并支持对尚未建连的 `~/.ssh/config` 别名实施按需惰性建连 `Lazy Connect`）：
+
+| 选择器类型 | 语法示例 | 解析与匹配规则 |
+| :--- | :--- | :--- |
+| **活跃连接宏** | `["@all_active"]` | 动态匹配连接池（`ConnectionPool`）中当前所有已建立连接的活跃节点 ID |
+| **配置别名宏** | `["@all_configured"]` | 解析并匹配本机 `~/.ssh/config` 中定义的所有非通配预设主机别名（未建连节点自动按需惰性建连） |
+| **通配符模式** | `["web-*", "*-prod"]` | 支持 `*` 通配符同时匹配已建连 `connectionId` 与 `~/.ssh/config` 中的主机别名 |
+| **显式目标与混合组合** | `["@all_active", "db-*", "bastion-1"]` | 支持将宏选择器、通配符与具体连接 ID / 别名自由组合，解析器自动按首次出现顺序去重 |
+
+#### 3. 批量命令执行 (`ssh_batch_exec`) 与 JSON-RPC 交互契约
+`ssh_batch_exec` 专为跨多台主机执行统一巡检、配置核对或滚动变更而设计，兼具 **前置安全守卫 (`SafetyGuard` 一票否决)** 与 **单节点 16KB 紧凑输出截断 (`OutputTruncator` 前 4KB + 后 12KB)** 保护，彻底杜绝多机输出撑爆大模型上下文窗口。
+
+##### 示例 A：受控并发批量巡检 (`mode: "parallel"`)
+并发向所有 `web-*` 节点与 `db-1` 节点采集负载状态（通过 `concurrency` 限制最大并发度为 5）：
+
+**JSON-RPC 请求 (`tools/call`)**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 101,
+  "method": "tools/call",
+  "params": {
+    "name": "ssh_batch_exec",
+    "arguments": {
+      "targets": ["web-*", "db-1"],
+      "command": "uptime && free -m",
+      "mode": "parallel",
+      "concurrency": 5,
+      "timeoutMs": 15000
+    }
+  }
+}
+```
+
+**结构化 JSON 响应载荷**：
+```json
+{
+  "command": "uptime && free -m",
+  "mode": "parallel",
+  "dryRun": false,
+  "totalTargets": 3,
+  "succeeded": 2,
+  "failed": 1,
+  "skipped": 0,
+  "executionTimeMs": 412,
+  "results": {
+    "web-1": {
+      "target": "web-1",
+      "status": "success",
+      "exitCode": 0,
+      "stdout": " 21:00:01 up 45 days, load average: 0.12, 0.08, 0.05\n...",
+      "stderr": "",
+      "executionTimeMs": 128,
+      "isTruncated": false,
+      "totalBytes": 215
+    },
+    "web-2": {
+      "target": "web-2",
+      "status": "failed",
+      "exitCode": null,
+      "stdout": "",
+      "stderr": "目标主机 \"web-2\" 处于熔断冷却期（剩余 52s），已快速拦截建连请求以保护宿主机资源。上次失败原因: connect ETIMEDOUT",
+      "executionTimeMs": 1,
+      "isTruncated": false,
+      "totalBytes": 0,
+      "error": "目标主机 \"web-2\" 处于熔断冷却期（剩余 52s），已快速拦截建连请求以保护宿主机资源。上次失败原因: connect ETIMEDOUT"
+    },
+    "db-1": {
+      "target": "db-1",
+      "status": "success",
+      "exitCode": 0,
+      "stdout": " 21:00:01 up 120 days, load average: 0.45, 0.30, 0.25\n...",
+      "stderr": "",
+      "executionTimeMs": 395,
+      "isTruncated": false,
+      "totalBytes": 218
+    }
+  }
+}
+```
+
+##### 示例 B：串行渐进变更与遇错熔断中止 (`mode: "serial"` + `stopOnError: true`)
+在生产集群执行滚动重启或配置发布时，开启 `serial` 串行模式与 `stopOnError: true`。一旦前序节点返回非零退出码、执行超时或建连失败，调度器立即中断后续发布，并将剩余未执行节点显式标记为 `skipped`，防止故障扩散至全集群：
+
+**JSON-RPC 请求 (`tools/call`)**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 102,
+  "method": "tools/call",
+  "params": {
+    "name": "ssh_batch_exec",
+    "arguments": {
+      "targets": ["web-1", "web-2", "web-3"],
+      "command": "nginx -t && systemctl reload nginx",
+      "mode": "serial",
+      "stopOnError": true,
+      "sudo": true
+    }
+  }
+}
+```
+
+**结构化 JSON 响应载荷（当 `web-1` 校验失败时自动保护 `web-2`、`web-3`）**：
+```json
+{
+  "command": "nginx -t && systemctl reload nginx",
+  "mode": "serial",
+  "dryRun": false,
+  "totalTargets": 3,
+  "succeeded": 0,
+  "failed": 1,
+  "skipped": 2,
+  "executionTimeMs": 185,
+  "results": {
+    "web-1": {
+      "target": "web-1",
+      "status": "failed",
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "nginx: [emerg] unknown directive in /etc/nginx/nginx.conf:42",
+      "executionTimeMs": 185,
+      "isTruncated": false,
+      "totalBytes": 60,
+      "error": "命令退出码非零 (1)"
+    },
+    "web-2": {
+      "target": "web-2",
+      "status": "skipped",
+      "exitCode": null,
+      "stdout": "",
+      "stderr": "",
+      "executionTimeMs": 0,
+      "isTruncated": false,
+      "totalBytes": 0
+    },
+    "web-3": {
+      "target": "web-3",
+      "status": "skipped",
+      "exitCode": null,
+      "stdout": "",
+      "stderr": "",
+      "executionTimeMs": 0,
+      "isTruncated": false,
+      "totalBytes": 0
+    }
+  }
+}
+```
+
+#### 4. 防雪崩熔断冷却机制 (`Connection Circuit Breaker with Cooldown`)
+在管理多台远程主机（尤其是开发测试机、边缘节点或跨云集群）时，常会遇到部分机器关机、防火墙丢包或网络闪断。若大模型在巡检任务中针对离线主机反复触发底层 TCP/SSH 重连，极易导致宿主机文件描述符（FD）耗尽、连接队列堆积与工具调用长尾挂起。为此，连接池内置了 **三态防雪崩连接熔断器 (`ConnectionCircuitBreaker`)**：
+
+1. **6 秒快速探测超时 (`MCP_SSH_CONNECT_TIMEOUT_MS=6000`)**：
+   - 多主机预连与探测握手默认采用 6 秒快速超时（可通过 `MCP_SSH_CONNECT_TIMEOUT_MS` 自定义）；
+   - 一旦底层 `ssh2.Client` 握手超时或触发网络错误，立即执行 `client.destroy()` 强制销毁底层 Socket，绝不遗留半开僵尸连接。
+2. **60 秒失败冷却期与零 Socket 快速短路 (`open` 状态)**：
+   - 任何建连失败的目标主机立即进入 **60 秒冷却期（Cooldown）**，并记录最近一次失败原因与时间戳；
+   - 在 60 秒冷却窗口内，任何针对该主机的再次建连请求（无论是 `ssh_connect` 还是 `ssh_batch_exec` 惰性建连）均在内存层被 `HostInCooldownError` **微秒级就地拦截拒绝**，**绝不分配任何底层 TCP Socket 或发起网络 I/O**，彻底保护宿主机资源。
+3. **冷却期满半开探活与自动恢复 (`half_open` -> `closed` 自愈)**：
+   - 60 秒冷却期满后，目标自动转入 `half_open`（半开探活）状态，放行下一次真实建连请求；
+   - 若握手成功则立即清零失败计数并恢复为 `closed`（健康闭合）状态；若再次失败则重新开启新一轮 60 秒冷却窗口。
 
 ---
 
@@ -720,9 +908,9 @@ docker run -i --rm \
 
 ---
 
-## 🛠️ 全量 29 个原子工具矩阵参考 (Tools)
+## 🛠️ 全量 30 个原子工具矩阵参考 (Tools)
 
-服务基于单一职责与高内聚原则，对外提供覆盖 Linux 运维全生命周期的 29 项工业级原子工具：
+服务基于单一职责与高内聚原则，对外提供覆盖 Linux 运维全生命周期的 30 项工业级原子工具：
 
 | 领域模块 | 工具名称 | 核心职责说明 | 关键输入参数 |
 | :--- | :--- | :--- | :--- |
@@ -733,7 +921,8 @@ docker run -i --rm \
 | | `ssh_list_connections` | 列出连接池中所有活跃连接、建连时间与默认路由标记 | 无 |
 | | `ssh_list_config_hosts` | 解析并列出本机 `~/.ssh/config` 预设的所有别名与主机 | 无 |
 | | `ssh_list_targets` | **[统一发现]** 一次性返回活跃连接与配置别名双重视图 | 无 |
-| **命令执行 (1)** | `ssh_exec` | 无状态执行远程 Shell 命令（支持 Sudo 隐式提权与 dryRun 演练） | `command`, `connectionId?`, `cwd?`, `sudo?`, `sudoPassword?`, `timeoutMs?`, `dryRun?`, `dangerouslySkipSafetyCheck?` |
+| **命令执行 (2)** | `ssh_exec` | 无状态执行远程 Shell 命令（支持 Sudo 隐式提权与 dryRun 演练） | `command`, `connectionId?`, `cwd?`, `sudo?`, `sudoPassword?`, `timeoutMs?`, `dryRun?`, `dangerouslySkipSafetyCheck?` |
+| | `ssh_batch_exec` | **[多机批量调度]** 支持宏选择器（`@all_active`/`@all_configured`）、通配符与并发/串行批量命令执行（单节点 16KB 紧凑防爆截断） | `targets`, `command`, `mode?` ("parallel"\|"serial"), `concurrency?`, `stopOnError?`, `timeoutMs?`, `cwd?`, `sudo?`, `sudoPassword?`, `dryRun?`, `dangerouslySkipSafetyCheck?` |
 | **交互终端 (3)** | `ssh_session_start` | 启动常驻交互式 PTY 伪终端会话流（支持调整窗口行列） | `connectionId?`, `cols?`, `rows?` |
 | | `ssh_session_send` | 向伪终端注入按键流、控制信号（如 `\x03` Ctrl+C）或提示符快响 | `sessionId`, `input`, `expectPattern?`, `waitForMs?` |
 | | `ssh_session_close` | 优雅销毁指定的交互式伪终端会话并回收系统资源 | `sessionId` |
@@ -899,13 +1088,13 @@ flowchart TD
 
         subgraph Security_Audit["安全与审计双保险 (ADR-0003, ADR-0014)"]
             Guard["SafetyGuard (致命破坏模式拦截)"]
-            Truncator["OutputTruncator (64KB 双端智能截断)"]
-            Audit["AuditService (29 工具全景审计 + 凭据递归脱敏 + 文件滚动切分)"]
+            Truncator["OutputTruncator (单机 64KB / 批量 16KB 双端智能截断)"]
+            Audit["AuditService (30 工具全景审计 + 凭据递归脱敏 + 文件滚动切分)"]
         end
         
-        subgraph Core_Services["29 项原子能力微服务集群"]
-            ConnPool["ConnectionPool (多主机连接池 / 路由 / 心跳保活)"]
-            Exec["ExecService (登录 Shell 执行 + 管道 Sudo 提权)"]
+        subgraph Core_Services["30 项原子能力微服务集群"]
+            ConnPool["ConnectionPool (多主机连接池 / 60s 防爆熔断冷却 / TargetResolver)"]
+            Exec["ExecService & BatchExecService (单机/多机并发串行执行 + 管道 Sudo 提权)"]
             Session["SessionService (持久 PTY 终端会话 + 提示符快响)"]
             SFTP["SFTPService (POSIX 文件系统 + 防环限制)"]
             TarStream["TarService (纯 JS 流式 Tar 双向目录同步)"]

@@ -230,6 +230,32 @@ _Avoid_: System Prompt (模型底层系统提示词), Guide Text, README
 当配置自定义服务身份标识时，在所有对外暴露的工具描述前透明追加 `[<serverName>] ` 紧凑前缀的轻量渲染机制，防止多服务并存时大模型混淆工具归属。
 _Avoid_: Tool Renaming (重命名工具名), Tool Alias
 
+### 多主机集群调度与防爆韧性 (Multi-Host Scheduling & Resilience)
+
+**Connection Circuit Breaker (连接防爆熔断器)**:
+内嵌于连接池（`ConnectionPool`）的三态（`closed` 闭合正常 / `open` 熔断冷却 / `half_open` 半开探活）宿主机资源保护状态机；当目标主机建连失败时触发强制冷却，在冷却期内于内存层微秒级短路拒绝重复建连请求（零底层 Socket / FD 分配），防范离线主机引发重试风暴与连接雪崩。
+_Avoid_: Rate Limiter (速率限制器), Firewall (防火墙), Retry Queue (重试队列)
+
+**Cooldown Period (失败冷却期)**:
+目标主机建连握手失败后熔断器保持 `open` 阻断状态的静默隔离时间窗口（默认 60 秒）；在此窗口内所有指向该主机的显式或惰性建连均立即抛出 `HostInCooldownError` 快速跳过，冷却期满后自动转入 `half_open` 放行单次探活。
+_Avoid_: Backoff Sleep (阻塞式退避休眠), Blacklist (永久黑名单)
+
+**Fast Probe Timeout (快速探测超时)**:
+在多主机异步预连接与集群批量调度场景下，为防止单台离线或丢包主机长期挂起握手通道而设定的短周期建连超时阈值（通过 `MCP_SSH_CONNECT_TIMEOUT_MS` 配置，默认 6000ms），超时瞬间立即销毁底层 Socket。
+_Avoid_: Command Timeout (命令执行超时), KeepAlive Interval (心跳保活间隔)
+
+**Multi-Target Pre-connection (多主机异步预连接)**:
+在 MCP 服务启动阶段，依据 `MCP_SSH_PRECONNECT_TARGETS` 规范环境变量配置的逗号分隔主机别名列表，于后台非阻塞并发建立多条 SSH 物理连接的软容错（Fail-Soft）预热机制；首个成功建连节点自动设为默认连接，单点失败仅记入熔断器而不中断服务启动。
+_Avoid_: Blocking Init (阻塞式初始化), Hard Fail Startup (单点失败阻断启动)
+
+**Target Resolver (目标解析器)**:
+负责将用户或大模型输入的抽象目标选择器（`Target Selector`，含 `@all_active` 活跃连接宏、`@all_configured` 配置别名宏、`web-*` 通配符模式及显式连接 ID / 别名列表）保序去重解析为唯一可执行目标集合，并协调按需惰性建连（Lazy Connect）的路由解析组件。
+_Avoid_: Host Scanner (主机扫描器), DNS Resolver (域名解析器)
+
+**Batch Execution (`BatchExecService` / `ssh_batch_exec` 批量命令执行)**:
+面向多目标主机集合实施并发限流（`parallel` 信号量池控制）或渐进串行（`serial` 支持 `stopOnError` 遇错中断跳过 `skipped`）的集群命令调度引擎；强制执行前置安全守卫一票否决与单节点 16KB 紧凑输出截断，输出汇总统计与逐节点结构化结果明细。
+_Avoid_: Loop Exec (客户端循环单发), Ansible Playbook (重型外部编排器)
+
 ### 开源工程与自动化发版体系 (OSS Engineering & Release Infrastructure)
 
 **Binary CI/CD Workflow (二元 CI/CD 工作流)**:
