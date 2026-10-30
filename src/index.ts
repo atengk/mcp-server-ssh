@@ -12,6 +12,11 @@ import { z } from "zod";
 import { getPreConnectParams, parseEnv } from "./config/env.js";
 import { SSHConfigParser } from "./connection/config-parser.js";
 import { ConnectionPool } from "./connection/pool.js";
+import {
+  TARGET_MACRO_ALL_ACTIVE,
+  TARGET_MACRO_ALL_CONFIGURED,
+  TargetResolver,
+} from "./connection/target-resolver.js";
 import { SafetyGuard } from "./security/guard.js";
 import { OutputTruncator } from "./security/truncator.js";
 import { validateConnectionTarget } from "./security/target-guard.js";
@@ -88,6 +93,12 @@ export type {
   ConnectionCircuitBreakerOptions,
 } from "./connection/pool.js";
 export { SSHConfigParser } from "./connection/config-parser.js";
+export {
+  TARGET_MACRO_ALL_ACTIVE,
+  TARGET_MACRO_ALL_CONFIGURED,
+  TargetResolver,
+} from "./connection/target-resolver.js";
+export type { TargetResolverOptions } from "./connection/target-resolver.js";
 export { SystemService } from "./services/system-service.js";
 export { TunnelService } from "./services/tunnel-service.js";
 export { JobService } from "./services/job-service.js";
@@ -141,6 +152,10 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       configParser,
       connectTimeoutMs: envConfig.connectTimeoutMs,
     });
+  const targetResolver = new TargetResolver({
+    connectionPool: pool,
+    configParser,
+  });
   const safetyGuard = options?.safetyGuard ?? new SafetyGuard();
   const outputTruncator = options?.outputTruncator ?? new OutputTruncator();
   const auditService =
@@ -354,22 +369,12 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
     "统一目标发现视图：一次性聚合返回当前已连接活跃节点与本地 ~/.ssh/config 预设主机清单",
     {},
     async () => {
-      const activeConnections = pool.listConnections();
-      const configuredHosts = configParser.listHosts();
+      const discoveryResult = targetResolver.discoverTargets();
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(
-              {
-                totalActive: activeConnections.length,
-                totalConfigured: configuredHosts.length,
-                activeConnections,
-                configuredHosts,
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify(discoveryResult, null, 2),
           },
         ],
       };
@@ -1196,7 +1201,64 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
 }
 
 /**
- * 依据应用配置自动预建立默认主机连接
+ * 依据应用配置并发异步预连接 MCP_SSH_PRECONNECT_TARGETS 指定的多台主机
+ *
+ * 采用软容错 (Fail-Soft) 机制，单机失联仅记录 warning 并进入熔断器冷却期，不阻断服务正常启动
+ *
+ * @param pool 连接池实例
+ * @param config 应用全局配置
+ */
+export async function preconnectConfiguredHosts(
+  pool: ConnectionPool,
+  config: ReturnType<typeof parseEnv>
+): Promise<void> {
+  const targets = config.preconnectTargets;
+  if (!targets || targets.length === 0) {
+    return;
+  }
+
+  process.stderr.write(
+    `[mcp-server-ssh] 检测到多主机预连清单 (${targets.length} 个目标: ${targets.join(", ")})，正在并发发起预建连...\n`
+  );
+
+  await Promise.allSettled(
+    targets.map(async (alias) => {
+      try {
+        const info = await pool.connect({
+          sshConfigAlias: alias,
+          connectionId: alias,
+          setAsDefault: false,
+          readyTimeout: config.connectTimeoutMs,
+          keepaliveInterval: config.keepAliveIntervalMs,
+          username: config.target?.username,
+          password: config.target?.password,
+          privateKey: config.target?.privateKey,
+          passphrase: config.target?.passphrase,
+        });
+        process.stderr.write(
+          `[mcp-server-ssh] 预连主机成功: [${info.connectionId}] -> ${info.host}:${info.port}\n`
+        );
+      } catch (err) {
+        process.stderr.write(
+          `[mcp-server-ssh] [WARN] 预连主机 "${alias}" 失败 (已实施软容错与熔断保护): ${
+            err instanceof Error ? err.message : String(err)
+          }\n`
+        );
+      }
+    })
+  );
+
+  // 若此前尚未设置默认连接，将首个预连成功的活跃连接设为默认连接
+  if (!pool.getConnection()) {
+    const active = pool.listConnections();
+    if (active.length > 0) {
+      pool.setDefaultConnection(active[0].connectionId);
+    }
+  }
+}
+
+/**
+ * 依据应用配置自动预建立默认主机连接与多主机预连清单
  */
 async function autoConnectDefaultHost(pool: ConnectionPool, config: ReturnType<typeof parseEnv>): Promise<void> {
   const preConnectParams = getPreConnectParams(config);
@@ -1213,6 +1275,8 @@ async function autoConnectDefaultHost(pool: ConnectionPool, config: ReturnType<t
       );
     }
   }
+
+  await preconnectConfiguredHosts(pool, config);
 }
 
 /**

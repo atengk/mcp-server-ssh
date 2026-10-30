@@ -96,6 +96,8 @@ export interface AppConfig {
   keepAliveIntervalMs: number;
   allowDangerousCommands: boolean;
   target?: TargetHostConfig;
+  /** 启动阶段异步并发预连接的主机别名列表 */
+  preconnectTargets?: string[];
   proxyJump?: ProxyJumpConfig;
   tunnel?: TunnelConfig;
   audit: AuditConfig;
@@ -258,6 +260,27 @@ function parseNonNegativeInt(
 
 
 /**
+ * 解析逗号分隔的字符串列表并过滤空白项
+ *
+ * @param value 原始逗号分隔字符串
+ * @param deduplicate 是否按首次出现顺序去重
+ * @return 解析后的非空字符串数组，输入为空时返回 undefined
+ */
+function parseCsvList(value: string | undefined, deduplicate = false): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (items.length === 0) {
+    return undefined;
+  }
+  return deduplicate ? Array.from(new Set(items)) : items;
+}
+
+/**
  * 提取并规范化私钥凭证输入 (仅支持 MCP_SSH_PRIVATE_KEY_BASE64, MCP_SSH_PRIVATE_KEY, MCP_SSH_PRIVATE_KEY_PATH)
  *
  * @param env 环境变量字典
@@ -366,6 +389,11 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     };
   }
 
+  const preconnectTargets = parseCsvList(
+    getEnvValue(env, "MCP_SSH_PRECONNECT_TARGETS"),
+    true
+  );
+
   // 4. 跳板机 (ProxyJump) 配置解析
   const proxyHost = getEnvValue(env, "MCP_SSH_PROXY_HOST");
   let proxyJump: ProxyJumpConfig | undefined;
@@ -427,13 +455,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   // 8. 目标白名单与动态建连约束 (ADR-0017)
-  const allowedTargetsRaw = getEnvValue(env, "MCP_SSH_ALLOWED_TARGETS");
-  const allowedTargets = allowedTargetsRaw
-    ? allowedTargetsRaw
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0)
-    : undefined;
+  const allowedTargets = parseCsvList(getEnvValue(env, "MCP_SSH_ALLOWED_TARGETS"));
   const disableDynamicConnect = parseBoolean(
     getEnvValue(env, "MCP_SSH_DISABLE_DYNAMIC_CONNECT"),
     false,
@@ -441,13 +463,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   );
 
   // 9. CORS 来源白名单 (ADR-0017)
-  const allowedOriginsRaw = getEnvValue(env, "MCP_SSH_ALLOWED_ORIGINS");
-  const allowedOrigins = allowedOriginsRaw
-    ? allowedOriginsRaw
-        .split(",")
-        .map((o) => o.trim())
-        .filter((o) => o.length > 0)
-    : undefined;
+  const allowedOrigins = parseCsvList(getEnvValue(env, "MCP_SSH_ALLOWED_ORIGINS"));
 
   // 10. 预建端口转发与 SOCKS5 代理隧道配置解析 (12-Factor App)
   const tunnelTypeRaw = getEnvValue(env, "MCP_SSH_TUNNEL_TYPE");
@@ -520,6 +536,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     keepAliveIntervalMs,
     allowDangerousCommands,
     target,
+    preconnectTargets,
     proxyJump,
     tunnel,
     audit,

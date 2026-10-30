@@ -42,7 +42,13 @@ export const SSHConnectParamsSchema = z.object({
   keepaliveInterval: z.number().int().positive().optional().describe("心跳保活检测发送间隔（毫秒），默认 10000"),
 });
 
-export type SSHConnectParams = z.infer<typeof SSHConnectParamsSchema>;
+export type SSHConnectParams = Omit<
+  z.infer<typeof SSHConnectParamsSchema>,
+  "port" | "setAsDefault"
+> & {
+  port?: number;
+  setAsDefault?: boolean;
+};
 
 /**
  * 关闭 SSH 连接参数 Schema
@@ -77,9 +83,28 @@ export const ConfigHostInfoSchema = z.object({
   user: z.string().optional().describe("配置的登录用户名"),
   port: z.number().optional().describe("配置的 SSH 端口"),
   proxyJump: z.string().optional().describe("配置的跳板机别名或连接配置"),
+  status: z
+    .enum(["connected", "cooldown", "half_open", "disconnected"])
+    .optional()
+    .describe("当前连接状态：connected(已连接)、cooldown(熔断冷却中)、half_open(冷却期满待探活)、disconnected(未连接)"),
+  connectionId: z.string().optional().describe("若已建立连接，对应的活跃连接 ID"),
+  lastError: z.string().optional().describe("若建连失败处于熔断期，记录最近一次失败原因"),
 });
 
 export type ConfigHostInfo = z.infer<typeof ConfigHostInfoSchema>;
+
+/**
+ * 熔断失败目标主机快照 Schema
+ */
+export const FailedTargetInfoSchema = z.object({
+  targetId: z.string().describe("目标主机标识（别名或 host:port）"),
+  failedAt: z.number().describe("失败发生时间戳（毫秒）"),
+  cooldownUntil: z.number().describe("冷却期截止时间戳（毫秒）"),
+  lastError: z.string().describe("最近一次失败的错误描述"),
+  state: z.enum(["open", "half_open"]).describe("熔断器当前状态"),
+});
+
+export type FailedTargetInfo = z.infer<typeof FailedTargetInfoSchema>;
 
 /**
  * 统一目标发现结果 Schema
@@ -87,8 +112,10 @@ export type ConfigHostInfo = z.infer<typeof ConfigHostInfoSchema>;
 export const SSHListTargetsResultSchema = z.object({
   activeConnections: z.array(ConnectionInfoSchema).describe("当前已连接并鉴权的活跃 SSH 物理链路列表"),
   configuredHosts: z.array(ConfigHostInfoSchema).describe("本地 ~/.ssh/config 中解析到的预设主机配置清单"),
+  failedTargets: z.array(FailedTargetInfoSchema).optional().describe("当前处于熔断冷却或半开状态的目标主机列表"),
   totalActive: z.number().describe("活跃连接总数"),
   totalConfigured: z.number().describe("配置主机总数"),
+  totalFailed: z.number().optional().describe("处于熔断状态的目标总数"),
 });
 
 export type SSHListTargetsResult = z.infer<typeof SSHListTargetsResultSchema>;

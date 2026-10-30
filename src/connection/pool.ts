@@ -137,12 +137,22 @@ export class ConnectionPool {
     let targetKey: string | undefined;
     let jumpClient: Client | undefined;
     try {
-      // 1. 若指定了 Host 别名，优先从 ~/.ssh/config 继承配置
+      // 1. 若指定了 Host 别名，优先从 ~/.ssh/config 继承配置（过滤掉 undefined 字段防止覆盖别名属性）
       let effectiveParams: SSHConnectParams = { ...params };
       if (params.sshConfigAlias) {
         const aliasConfig = this.configParser.resolveHost(params.sshConfigAlias);
         if (aliasConfig) {
-          effectiveParams = { ...aliasConfig, ...params };
+          const definedOverrides = Object.fromEntries(
+            Object.entries(params).filter(([, value]) => value !== undefined)
+          ) as Partial<SSHConnectParams>;
+          effectiveParams = {
+            ...aliasConfig,
+            ...definedOverrides,
+            port: params.port ?? aliasConfig.port ?? 22,
+            // 凭证瀑布流：SSH Config IdentityFile 优先于全局默认私钥
+            privateKey: aliasConfig.privateKey ?? params.privateKey,
+            username: params.username ?? aliasConfig.username,
+          };
         }
       }
 
