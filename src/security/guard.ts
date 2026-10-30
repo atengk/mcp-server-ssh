@@ -147,6 +147,16 @@ export class SafetyGuard {
   }
 
   /**
+   * 校验目标 Shell 命令的安全性（check 方法的标准别名）
+   *
+   * @param command 待下发的原始命令行文本
+   * @return 安全检查结果
+   */
+  public validate(command: string): SafetyCheckResult {
+    return this.check(command);
+  }
+
+  /**
    * 断言命令安全；若触发致命规则则直接抛出语义化异常
    *
    * @param command 待检验的命令行

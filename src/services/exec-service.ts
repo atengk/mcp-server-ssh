@@ -48,6 +48,57 @@ export class ExecService {
 
 
   /**
+   * 校验命令安全性并记录安全审计事件
+   *
+   * @param command 待执行的命令字符串
+   * @param dangerouslySkipSafetyCheck 是否跳过安全守卫校验
+   * @param connectionId 可选的目标连接标识
+   * @throws 当触发高危规则或未授权跳过安全检查时抛出异常
+   */
+  public validateCommandSafety(
+    command: string,
+    dangerouslySkipSafetyCheck = false,
+    connectionId?: string
+  ): void {
+    if (dangerouslySkipSafetyCheck) {
+      if (!this.allowDangerousCommands) {
+        throw new Error(
+          "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
+        );
+      }
+      void this.auditService?.log({
+        level: "security",
+        category: "safety",
+        action: "dangerous_command_override",
+        connectionId,
+        params: { command },
+        result: { status: "success", durationMs: 0 },
+        source: "service_internal",
+      });
+      return;
+    }
+
+    const validation = this.safetyGuard.validate(command);
+    if (!validation.isAllowed) {
+      const errMessage = validation.reason || "命令触发高危安全拦截，拒绝执行";
+      void this.auditService?.log({
+        level: "security",
+        category: "safety",
+        action: "safety_guard_blocked",
+        connectionId,
+        params: { command },
+        result: {
+          status: "blocked",
+          durationMs: 0,
+          error: errMessage,
+        },
+        source: "service_internal",
+      });
+      throw new Error(errMessage);
+    }
+  }
+
+  /**
    * 执行无状态远程 Bash 命令
    *
    * @param rawParams 命令执行入参
@@ -59,43 +110,11 @@ export class ExecService {
     const startTime = Date.now();
 
     // 1. 前置安全守卫校验（支持环境变量集中配置 + 入参显式双重授权逃生门）
-    if (params.dangerouslySkipSafetyCheck) {
-      if (!this.allowDangerousCommands) {
-        throw new Error(
-          "拒绝执行危险命令：检测到 dangerouslySkipSafetyCheck 请求，但服务端未配置环境变量 MCP_SSH_ALLOW_DANGEROUS_COMMANDS=true 授权放行"
-        );
-      }
-      // 记录危险命令强制放行内部安全事件
-      void this.auditService?.log({
-        level: "security",
-        category: "safety",
-        action: "dangerous_command_override",
-        connectionId: params.connectionId,
-        params: { command: params.command },
-        result: { status: "success", durationMs: 0 },
-        source: "service_internal",
-      });
-    } else {
-      try {
-        this.safetyGuard.assertSafe(params.command);
-      } catch (err) {
-        // 记录高危命令拦截内部安全事件
-        void this.auditService?.log({
-          level: "security",
-          category: "safety",
-          action: "safety_guard_blocked",
-          connectionId: params.connectionId,
-          params: { command: params.command },
-          result: {
-            status: "blocked",
-            durationMs: 0,
-            error: err instanceof Error ? err.message : String(err),
-          },
-          source: "service_internal",
-        });
-        throw err;
-      }
-    }
+    this.validateCommandSafety(
+      params.command,
+      params.dangerouslySkipSafetyCheck,
+      params.connectionId
+    );
 
     // 2. 若仅为试运行检测 (dryRun)，放行并直接返回测试标记
     if (params.dryRun) {

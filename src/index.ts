@@ -20,6 +20,7 @@ import {
 import { SafetyGuard } from "./security/guard.js";
 import { OutputTruncator } from "./security/truncator.js";
 import { validateConnectionTarget } from "./security/target-guard.js";
+import { BatchExecService } from "./services/batch-exec-service.js";
 import { ExecService } from "./services/exec-service.js";
 import { SessionService } from "./services/session-service.js";
 import { SFTPService } from "./services/sftp-service.js";
@@ -37,6 +38,7 @@ import {
   SSHListTargetsResultSchema,
 } from "./types/connection.js";
 import {
+  SSHBatchExecParamsSchema,
   SSHExecParamsSchema,
   SSHSessionCloseParamsSchema,
   SSHSessionSendParamsSchema,
@@ -102,6 +104,13 @@ export type { TargetResolverOptions } from "./connection/target-resolver.js";
 export { SystemService } from "./services/system-service.js";
 export { TunnelService } from "./services/tunnel-service.js";
 export { JobService } from "./services/job-service.js";
+export {
+  BATCH_NODE_HEAD_BYTES,
+  BATCH_NODE_MAX_BYTES,
+  BATCH_NODE_TAIL_BYTES,
+  BatchExecService,
+} from "./services/batch-exec-service.js";
+export type { BatchExecServiceOptions } from "./services/batch-exec-service.js";
 export { parseCLIArgs, getHelpText, SERVICE_VERSION, runDoctor } from "./cli/index.js";
 export type { CLIOptions, DoctorCheckItem, DoctorResult, DoctorStatus } from "./cli/index.js";
 export { AuditService } from "./audit/index.js";
@@ -117,6 +126,7 @@ export interface MCPServerOptions {
   safetyGuard?: SafetyGuard;
   outputTruncator?: OutputTruncator;
   execService?: ExecService;
+  batchExecService?: BatchExecService;
   sessionService?: SessionService;
   sftpService?: SFTPService;
   tunnelService?: TunnelService;
@@ -167,6 +177,16 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
       connectionPool: pool,
       safetyGuard,
       outputTruncator,
+      allowDangerousCommands: options?.allowDangerousCommands,
+      auditService,
+    });
+  const batchExecService =
+    options?.batchExecService ??
+    new BatchExecService({
+      connectionPool: pool,
+      configParser,
+      targetResolver,
+      safetyGuard,
       allowDangerousCommands: options?.allowDangerousCommands,
       auditService,
     });
@@ -457,6 +477,37 @@ export function createMCPServer(options?: MCPServerOptions): McpServer {
             {
               type: "text",
               text: `命令执行异常: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 6b. 注册多主机批量无状态命令执行工具
+  server.tool(
+    "ssh_batch_exec",
+    "向多台目标 Linux 主机批量分发执行无状态 Bash/Shell 命令（支持 @all_active、@all_configured、通配符、并发限流、串行中断及 16KB 紧凑输出截断）",
+    SSHBatchExecParamsSchema.shape,
+    async (params) => {
+      try {
+        const result = await batchExecService.executeBatch(params);
+        return {
+          isError: result.failed > 0 && result.succeeded === 0,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `批量命令执行异常: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };

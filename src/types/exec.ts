@@ -83,3 +83,79 @@ export const SSHSessionCloseParamsSchema = z.object({
 });
 
 export type SSHSessionCloseParams = z.infer<typeof SSHSessionCloseParamsSchema>;
+
+/**
+ * 多主机批量无状态命令执行入参 Schema（复用单机执行参数契约并扩展批量调度选项）
+ */
+export const SSHBatchExecParamsSchema = SSHExecParamsSchema.omit({
+  connectionId: true,
+}).extend({
+  targets: z
+    .array(z.string().min(1))
+    .min(1, "目标主机列表不能为空")
+    .describe(
+      "目标主机选择器列表（支持主机别名、连接 ID、'@all_active'、'@all_configured' 或通配符如 'web-*'）"
+    ),
+  mode: z
+    .enum(["parallel", "serial"])
+    .default("parallel")
+    .describe("批量调度模式：parallel（受控并发，默认）或 serial（顺序串行）"),
+  concurrency: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5)
+    .describe("parallel 并发模式下的最大并发数上限（1-20，默认 5）"),
+  stopOnError: z
+    .boolean()
+    .default(false)
+    .describe("serial 串行模式下遇到节点失败或非 0 退出码时是否立即中断后续节点执行（默认 false）"),
+});
+
+export type SSHBatchExecParams = z.infer<typeof SSHBatchExecParamsSchema>;
+export type SSHBatchExecInputParams = z.input<typeof SSHBatchExecParamsSchema>;
+
+/**
+ * 批量执行单节点结果状态模型 Schema
+ */
+export const SSHBatchNodeResultSchema = z.object({
+  target: z.string().describe("目标主机标识"),
+  status: z
+    .enum(["success", "failed", "skipped"])
+    .describe("节点执行状态：success（成功）、failed（失败）或 skipped（串行中断跳过）"),
+  exitCode: z
+    .number()
+    .int()
+    .nullable()
+    .describe("远程进程退出码（未执行或建连失败时为 null）"),
+  stdout: z
+    .string()
+    .describe("标准输出文本（已剥离 ANSI 控制字符且经过 16KB 紧凑截断保护）"),
+  stderr: z.string().describe("标准错误输出文本"),
+  executionTimeMs: z.number().describe("该节点实际执行耗时（毫秒）"),
+  isTruncated: z.boolean().describe("输出是否因超出 16KB 预算而被截断"),
+  totalBytes: z.number().describe("原始输出总字节数"),
+  error: z.string().optional().describe("当建连失败、熔断拦截或超时异常时的错误详情"),
+});
+
+export type SSHBatchNodeResult = z.infer<typeof SSHBatchNodeResultSchema>;
+
+/**
+ * 多主机批量命令执行聚合返回结果 Schema
+ */
+export const SSHBatchExecResultSchema = z.object({
+  command: z.string().describe("执行的命令"),
+  mode: z.enum(["parallel", "serial"]).describe("执行调度模式"),
+  dryRun: z.boolean().describe("是否为 dryRun 预检模式"),
+  totalTargets: z.number().int().describe("展开去重后的目标主机总数"),
+  succeeded: z.number().int().describe("执行成功的节点数"),
+  failed: z.number().int().describe("执行失败的节点数"),
+  skipped: z.number().int().describe("因串行遇错中断而跳过的节点数"),
+  executionTimeMs: z.number().describe("批量任务总耗时（毫秒）"),
+  results: z
+    .record(z.string(), SSHBatchNodeResultSchema)
+    .describe("按目标主机标识索引的各节点独立执行结果映射"),
+});
+
+export type SSHBatchExecResult = z.infer<typeof SSHBatchExecResultSchema>;

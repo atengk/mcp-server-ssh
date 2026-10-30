@@ -95,13 +95,19 @@ export class OutputTruncator {
     }
 
     // 2. 超出阈值，计算头尾切割点
-    const effectiveHead = Math.min(this.headBytes, Math.floor(limit / 8));
+    const effectiveHead =
+      overrideMaxBytes !== undefined
+        ? Math.min(this.headBytes, Math.floor(limit / 8))
+        : this.headBytes;
     const effectiveTail = limit - effectiveHead;
 
     const headSlice = buf.subarray(0, effectiveHead).toString("utf-8");
     const tailSlice = buf.subarray(originalBytes - effectiveTail).toString("utf-8");
 
-    const warningNotice = `\n\n[... ⚠️ MCP 安全警告：输出超出 64KB 限制，已自动保留头部 8KB 与尾部 56KB（原始总计 ${originalBytes} 字节）。如需查看完整大日志，请使用 sftp_download 工具下载到本地，或使用 grep/tail 命令过滤 ...]\n\n`;
+    const limitKb = Math.round(limit / 1024);
+    const headKb = Math.round(effectiveHead / 1024);
+    const tailKb = Math.round(effectiveTail / 1024);
+    const warningNotice = `\n\n[... ⚠️ MCP 安全警告：输出超出 ${limitKb}KB 限制，已自动保留头部 ${headKb}KB 与尾部 ${tailKb}KB（原始总计 ${originalBytes} 字节）。如需查看完整大日志，请使用 sftp_download 工具下载到本地，或使用 grep/tail 命令过滤 ...]\n\n`;
 
     const combinedText = `${headSlice}${warningNotice}${tailSlice}`;
     const retainedBytes = Buffer.byteLength(combinedText, "utf-8");
